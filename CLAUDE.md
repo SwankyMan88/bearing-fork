@@ -1,7 +1,7 @@
 # Rules for Bearing
 
 **Bearing** is a physics package that works with any engine. These rules are for building it. Its API copies the
-style of Winding (github.com/nolanbaxter/winding, npm `winding-engine`), Nolan's WebGPU engine, so
+style of Winding (github.com/getlowarc/winding, npm `winding-engine`), Nolan's WebGPU engine, so
 that someone who knows one already knows how the other works. Winding's API reference
 (`docs/API.md` in that repo) is the model. When these rules don't settle a question, do what
 Winding does, and when Winding doesn't cover it either, ask Nolan.
@@ -461,8 +461,9 @@ These were made with Nolan and override the rules below where they differ.
   Winding's `.github/affected.js` (the Node-suite part: imports and `new URL()` reads, followed
   down) and its test before the first release. This overrides rule 95's "once the suite is big
   enough". Winding's local checkout is `..\3D concept`; read it for how Winding did anything.
-- **GitHub: Nolan's personal account only** (2026-10-12). The repo is `nolanbaxter/bearing`,
-  public since 2026-10-13 (Nolan: "You can make it public whenever you are ready"). Commits are authored as
+- **GitHub: the `getlowarc` org, through Nolan's personal account only** (2026-10-12; moved from
+  `nolanbaxter/bearing` to the org on 2026-11-02, with Winding, as both became LowArc products). The
+  repo is `getlowarc/bearing`, public since 2026-10-13 (Nolan: "You can make it public whenever you are ready"). Commits are authored as
   `LmnTrtl <294360573+nolanbaxter@users.noreply.github.com>` (set in this repo's git config), and
   every `gh` call runs as the personal account (`GH_TOKEN=$(gh auth token --user NolanLT)`). The
   work account and work email never appear anywhere in this project.
@@ -472,8 +473,8 @@ These were made with Nolan and override the rules below where they differ.
   publishing can be configured.
 
 **The name.** The project is **Bearing**; the npm package is **`bearing-physics`** (plain `bearing`
-is taken). The repository is `nolanbaxter/bearing`, with no suffix, as Winding's is
-`nolanbaxter/winding`. Write "Bearing" in prose, with a capital and no ".js", the way Winding is
+is taken). The repository is `getlowarc/bearing`, with no suffix, as Winding's is
+`getlowarc/winding`. Write "Bearing" in prose, with a capital and no ".js", the way Winding is
 written. Imports look like Winding's:
 
 ```js

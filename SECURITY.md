@@ -9,7 +9,7 @@ version. Older versions are not patched. Until the first release, `develop` is w
 
 Please report it privately, not in a public issue: on the repository's **Security** tab, choose
 **Report a vulnerability**
-([direct link](https://github.com/nolanbaxter/bearing/security/advisories/new)). Say what is
+([direct link](https://github.com/getlowarc/bearing/security/advisories/new)). Say what is
 affected, how to reproduce it, and what an attacker could do with it.
 
 You will hear back within a week. A confirmed issue is fixed in a patch release and credited to

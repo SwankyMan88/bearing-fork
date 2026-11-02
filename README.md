@@ -84,7 +84,7 @@ slopes either side of their friction, a moving platform, a mixed pile, 2,000 bal
 bodies tumbling over a heightfield of hills and down a ramp read from a `.glb`, a character walking
 a route up stairs and down a ramp, and two colours on separate layers, with what each step costs, and how many bodies are asleep,
 shown live. Bearing draws nothing, so the demo is drawn by
-[Winding](https://github.com/nolanbaxter/winding), loaded from jsDelivr at a pinned version; it
+[Winding](https://github.com/getlowarc/winding), loaded from jsDelivr at a pinned version; it
 needs a browser with WebGPU. The demo is not part of the package, and no test needs it.
 
 ## Tests
