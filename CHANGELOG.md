@@ -9,6 +9,11 @@ All notable changes to Bearing are recorded here. The format follows
 
 ### Added
 
+- Joints are solved on the workers too: joints that share no moving body, and whole joint trees,
+  go to different threads, each body taking its pushes in the same order as on one thread, so the
+  results are the same to the bit with any number of workers. With that and work kept from one
+  pass to the next, 100 ragdolls standing on their motors step in about 6 ms instead of 26 on an
+  i7-1260P (18 to 21 ms on one thread), and ragdolls and chains are faster on one thread too.
 - `new World({ gravity })`, with `world.gravity`, `world.bodyCount`, `world.step(dt)` and
   `world.destroy()`. A step is exactly `dt` seconds of semi-implicit Euler: gravity for dynamic
   bodies, velocity for dynamic and kinematic ones.

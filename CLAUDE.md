@@ -220,6 +220,16 @@ These were made with Nolan and override the rules below where they differ.
   `spinMass()`/`spun()`, same bits. A holding rotation joint is in the forest; one to the world
   counts as held in `age()` but not held down (`plant()` takes a `point` callback). `_drives`
   counts for off-means-off. FORMAT 8. No-target joints keep their bits and time.
+  Many active ragdolls (2026-11-02, milestone 19, same bits): `fill()` in joint and forest scratch
+  replaced by plain stores; `inverse3`/`inverse5` written out (forest.js, as `inverse6`); kept work:
+  the relax pass stores each drive's pose-only results (`keeping()`, `turned()`, `hinged()`; `kept`/
+  `work`/`pose` scratch to `save()`) for the next solve pass, valid while `J.pose` (moved on at the
+  step's start and after each `_move`) is unchanged, so anything else moving bodies or `_invIt` in
+  the substep loop must move `J.pose` on; tree joints with no drive, friction or stop skip the
+  one-at-a-time pass. Joints on workers: `groupJoints()` (groups sharing no moving body, list order
+  kept), warm start and one-at-a-time rows by group, trees by tree (`holdTrees`, `F.start`/`F.trees`),
+  groups before trees each pass; from 2 groups (measured, `r41least`); `save()` writes back only
+  bodies that can move. 100 driven ragdolls 25.4 -> ~6 ms with 'auto', 18-21 ms one thread.
 - **Continuous collision** (2026-10-15, milestone 13, approved): speculative contacts stay; a pair
   not touching that moves against itself by more than its tolerance in the step (`moving()` in
   `src/contact.js`) asks `impact()` (`src/impact.js`, conservative advancement over velocity,

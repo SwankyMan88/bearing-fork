@@ -682,12 +682,27 @@ the games: read the force, remove the joint.
 *Done when:* a hanging weight reads its weight through its joint, a jerk reads its peak, and the
 figures are the same with any number of workers.
 
-**19. Many active ragdolls ⬜**
+**19. Many active ragdolls ✅** *(done 2026-11-02; same bits throughout)*
 *Concepts:* profiling joint-heavy scenes; tree solves at scale; workers for joints.
 The speed goal above: 100 active ragdolls holding a pose in 8 ms or less a step on the laptop.
 They never sleep, so the joint solve itself has to be fast. Measured with A/B blocks; anything that
 changes results only by a documented tolerance, and with Nolan's OK.
 *Done when:* the goal is met, or reset with Nolan with the measurements that show why.
+*Done (2026-11-02):* 100 ragdolls standing on their motors (sleeping off), i7-1260P: 25.4 ms ->
+about 6 ms a step with workers ('auto', 7 workers there), 18-21 ms on one thread; the goal met
+with workers. Every change keeps the bits. Measured, pinned A/B, median of three processes, both
+orders: (A) `fill()` in joint and forest scratch replaced by plain stores, 11.6-12.8%; (B)
+`inverse3`/`inverse5` written out in `forest.js` as `inverse6` was, 8-11%; (C) kept work: the
+relax pass stores each drive's pose-only results (coupling and inverse, pinned rows, a hinge's
+motor mass and angle, the drive error) and the next solve pass reads them back (`J.pose` counts
+poses, moved on after each `_move`; scratch to `save()`), and tree joints with no drive, friction or
+stop skip the one-at-a-time pass, 14-17%; (D) joints on the workers: `groupJoints()` splits each
+step's joints into groups sharing no moving body (list order kept within a group), the warm start
+and one-at-a-time rows dispatched by group, the trees by tree, groups before trees in each pass, so
+every body takes its pushes in the one-thread order; from 2 groups up (1 group 83% slower; 2,
+20-28% faster; 16, 73%). Ragdolls 8-13% and chains 15-27% faster on one thread too; pile and
+pyramid even. Next levers, same bits: `solveForest` written out for blocks of 3 and 5 rows (about
+15% of a step), the kept rows reused in the warm start, no grouping with no workers.
 
 **20. Documentation ⬜**
 *Concepts:* writing reference documentation people can learn from.

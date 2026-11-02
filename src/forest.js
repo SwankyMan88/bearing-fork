@@ -76,6 +76,7 @@ export class Forest {
     this.count = 0;        // joints in the forest this step
     this.bodies = 0;       // bodies in it
     this.nodes = 0;
+    this.trees = 0;        // trees in it, each a run of the order from start[r] to start[r + 1]
     this._alloc(0);
   }
 
@@ -107,6 +108,7 @@ export class Forest {
     grow('since', Float64Array, 2 * 4);  // its rotation when its tree was last factored (joints.js, age())
     // The elimination: every node (joints 0..count-1, bodies count..), parents before children.
     grow('order', Int32Array, 3);
+    grow('start', Int32Array, 3);      // each tree's first node in the order, and then the end: trees + 1 of them
     grow('parent', Int32Array, 3);
     grow('vector', Float64Array, 3 * NODE);   // per node, the solve's working values
     this.capacity = n;
@@ -162,10 +164,14 @@ export function plant(world, list, n, holds, point) {
   // its parent; eliminated in reverse, children come first.
   const T = F.count, seen = F.vector;   // free until the solve: a mark per node
   seen.fill(0, 0, T + F.bodies);
-  let length = 0;
+  let length = 0, trees = 0;
   for (let k = 0; k < F.bodies; k++) {
-    if (seen[T + k] === 0) length = branch(F, T + k, length, seen);
+    if (seen[T + k] !== 0) continue;
+    F.start[trees++] = length;
+    length = branch(F, T + k, length, seen);
   }
+  F.start[trees] = length;
+  F.trees = trees;
   F.nodes = length;
   // A tree with a joint to something the solve doesn't move (a static,
   // kinematic or character body, or a point in the world) is held down: its
@@ -266,10 +272,12 @@ const L = new Float64Array(36), Y = new Float64Array(6), PIVOT = new Uint8Array(
 const AX9 = new Float64Array(9);
 
 /**
- * Factors the forest's matrix from its joints' rows at F.row: each node's
- * block's inverse, children first, for the trees F.fresh marks: every tree at
- * a step's first substep, and after that only one a body of which has turned
- * too far since (see joints.js, age()).
+ * Factors the forest's matrix from its joints' rows at F.row, for the trees
+ * whose nodes lie in the order from `from` to `to`: each node's block's
+ * inverse, children first, for the trees F.fresh marks: every tree at a
+ * step's first substep, and after that only one a body of which has turned
+ * too far since (see joints.js, age()). Trees share nothing, so each may be
+ * factored on its own, by any thread.
  *
  * A body's block D = M - S (S = Σ Jᵀ D⁻¹ J over its child joints) is
  * symmetric and positive definite, so it is inverted through its Cholesky
@@ -277,23 +285,26 @@ const AX9 = new Float64Array(9);
  * same. A body that can't turn about some axis has no finite M there, and
  * its block is kept as (I - W S)⁻¹ W instead, from its inverse mass matrix W.
  */
-export function factorForest(world) {
-  const F = world._joints.forest, T = F.count, n = F.nodes, order = F.order, parent = F.parent;
+export function factorForest(world, from, to) {
+  const F = world._joints.forest, T = F.count, order = F.order, parent = F.parent;
   const invMass = world._invMass, invI = world._invIt, lock = world._lock;
   const first = F.first, next = F.next, rows = F.rows, side = F.side, jac = F.jac;
   const D = F.jointInverse, inv = F.inverse, up = F.up, down = F.down, fresh = F.fresh;
-  for (let t = 0; t < T; t++) if (fresh[t] !== 0) shape(F, t);
+  for (let i = from; i < to; i++) {
+    const t = order[i];
+    if (t < T && fresh[t] !== 0) shape(F, t);
+  }
   // The loops below take every sum's terms in the order a plain loop over
   // q would (from 0, and from a 0 start, which keeps a -0 term's sign as
   // the loop did), so the factor is the same to the bit; only the index
   // arithmetic is hoisted, and sums over 6 unrolled. Measured: see
   // ROADMAP.md, milestone 16.
-  for (let i = n - 1; i >= 0; i--) {
+  for (let i = to - 1; i >= from; i--) {
     const x = order[i];
     if (fresh[x] === 0) continue;   // a tree whose factor is kept
     if (x >= T) {
       const k = x - T, s = F.body[k], o = 36 * k;
-      S.fill(0);
+      for (let q = 0; q < 36; q++) S[q] = 0;
       let any = false;
       for (let e = first[k] - 1; e >= 0; e = next[e] - 1) {
         const t = e >> 1;
@@ -339,7 +350,7 @@ export function factorForest(world) {
     } else {
       // A joint's block: D = -(give + Σ J D⁻¹ Jᵀ) over its child bodies.
       const t = x, m = rows[t], give = COMPLIANCE * F.scale[t] / m;
-      E.fill(0, 0, m * m);
+      for (let q = 0; q < m * m; q++) E[q] = 0;
       for (let r = 0; r < m; r++) E[r * m + r] = give;
       for (let sd = 0; sd < 2; sd++) {
         const k = side[2 * t + sd];
@@ -385,7 +396,7 @@ function shape(F, t) {
 
 /** Body slot s's mass matrix, m on the diagonal for moving and its world inertia R diag(I) Rᵀ for turning, where it has turned to now, into out. */
 function mass(world, s, out) {
-  out.fill(0);
+  for (let q = 0; q < 36; q++) out[q] = 0;
   const m = 1 / world._invMass[s];
   out[0] = m; out[7] = m; out[14] = m;
   const ax = AX9, a9 = 0, I = world._inertia, i0 = I[3 * s], i1 = I[3 * s + 1], i2 = I[3 * s + 2];
@@ -407,6 +418,8 @@ function mass(world, s, out) {
  */
 export function inverseSPD(A, n, out) {
   if (n === 6) return inverse6(A, out, 0);
+  if (n === 3) return inverse3(A, out);
+  if (n === 5) return inverse5(A, out);
   for (let c = 0; c < n; c++) {
     const cn = c * n;
     let d = A[cn + c];
@@ -528,23 +541,119 @@ function inverse6(A, out, p) {
 }
 
 /**
- * Solves the factored forest for the targets at F.rhs: every forest joint's
- * rows held exactly together. Leaves each body's velocity change, and each
- * joint's impulses, at its node in F.vector, for the caller to apply.
+ * inverseSPD for n = 3 (a ball joint's block, the turning rows of a ball or
+ * rotation joint's drive, a ball joint's pinned point) and n = 5 (a hinge's
+ * or slider's block and pinned rows), as inverse6 is for 6: the same
+ * operations in the same order, written out with the factor and its inverse
+ * in locals, so A may be out. The loops over n cost more than the sums
+ * themselves at these sizes. Measured: see ROADMAP.md, milestone 19.
  */
-export function solveForest(world) {
-  const F = world._joints.forest, T = F.count, n = F.nodes, order = F.order, parent = F.parent, vec = F.vector;
+function inverse3(A, out) {
+  const d0 = A[0];
+  if (!(d0 > 0)) return false;
+  const l00 = Math.sqrt(d0);
+  const l10 = (A[3]) / l00;
+  const l20 = (A[6]) / l00;
+  const d1 = A[4] - l10 * l10;
+  if (!(d1 > 0)) return false;
+  const l11 = Math.sqrt(d1);
+  const l21 = (A[7] - l20 * l10) / l11;
+  const d2 = A[8] - l20 * l20 - l21 * l21;
+  if (!(d2 > 0)) return false;
+  const l22 = Math.sqrt(d2);
+  const i00 = 1 / l00;
+  const i10 = (0 - l10 * i00) / l11;
+  const i20 = (0 - l20 * i00 - l21 * i10) / l22;
+  const i11 = 1 / l11;
+  const i21 = (0 - l21 * i11) / l22;
+  const i22 = 1 / l22;
+  out[0] = 0 + i00 * i00 + i10 * i10 + i20 * i20;
+  out[1] = out[3] = 0 + i10 * i11 + i20 * i21;
+  out[2] = out[6] = 0 + i20 * i22;
+  out[4] = 0 + i11 * i11 + i21 * i21;
+  out[5] = out[7] = 0 + i21 * i22;
+  out[8] = 0 + i22 * i22;
+  return true;
+}
+
+function inverse5(A, out) {
+  const d0 = A[0];
+  if (!(d0 > 0)) return false;
+  const l00 = Math.sqrt(d0);
+  const l10 = (A[5]) / l00;
+  const l20 = (A[10]) / l00;
+  const l30 = (A[15]) / l00;
+  const l40 = (A[20]) / l00;
+  const d1 = A[6] - l10 * l10;
+  if (!(d1 > 0)) return false;
+  const l11 = Math.sqrt(d1);
+  const l21 = (A[11] - l20 * l10) / l11;
+  const l31 = (A[16] - l30 * l10) / l11;
+  const l41 = (A[21] - l40 * l10) / l11;
+  const d2 = A[12] - l20 * l20 - l21 * l21;
+  if (!(d2 > 0)) return false;
+  const l22 = Math.sqrt(d2);
+  const l32 = (A[17] - l30 * l20 - l31 * l21) / l22;
+  const l42 = (A[22] - l40 * l20 - l41 * l21) / l22;
+  const d3 = A[18] - l30 * l30 - l31 * l31 - l32 * l32;
+  if (!(d3 > 0)) return false;
+  const l33 = Math.sqrt(d3);
+  const l43 = (A[23] - l40 * l30 - l41 * l31 - l42 * l32) / l33;
+  const d4 = A[24] - l40 * l40 - l41 * l41 - l42 * l42 - l43 * l43;
+  if (!(d4 > 0)) return false;
+  const l44 = Math.sqrt(d4);
+  const i00 = 1 / l00;
+  const i10 = (0 - l10 * i00) / l11;
+  const i20 = (0 - l20 * i00 - l21 * i10) / l22;
+  const i30 = (0 - l30 * i00 - l31 * i10 - l32 * i20) / l33;
+  const i40 = (0 - l40 * i00 - l41 * i10 - l42 * i20 - l43 * i30) / l44;
+  const i11 = 1 / l11;
+  const i21 = (0 - l21 * i11) / l22;
+  const i31 = (0 - l31 * i11 - l32 * i21) / l33;
+  const i41 = (0 - l41 * i11 - l42 * i21 - l43 * i31) / l44;
+  const i22 = 1 / l22;
+  const i32 = (0 - l32 * i22) / l33;
+  const i42 = (0 - l42 * i22 - l43 * i32) / l44;
+  const i33 = 1 / l33;
+  const i43 = (0 - l43 * i33) / l44;
+  const i44 = 1 / l44;
+  out[0] = 0 + i00 * i00 + i10 * i10 + i20 * i20 + i30 * i30 + i40 * i40;
+  out[1] = out[5] = 0 + i10 * i11 + i20 * i21 + i30 * i31 + i40 * i41;
+  out[2] = out[10] = 0 + i20 * i22 + i30 * i32 + i40 * i42;
+  out[3] = out[15] = 0 + i30 * i33 + i40 * i43;
+  out[4] = out[20] = 0 + i40 * i44;
+  out[6] = 0 + i11 * i11 + i21 * i21 + i31 * i31 + i41 * i41;
+  out[7] = out[11] = 0 + i21 * i22 + i31 * i32 + i41 * i42;
+  out[8] = out[16] = 0 + i31 * i33 + i41 * i43;
+  out[9] = out[21] = 0 + i41 * i44;
+  out[12] = 0 + i22 * i22 + i32 * i32 + i42 * i42;
+  out[13] = out[17] = 0 + i32 * i33 + i42 * i43;
+  out[14] = out[22] = 0 + i42 * i44;
+  out[18] = 0 + i33 * i33 + i43 * i43;
+  out[19] = out[23] = 0 + i43 * i44;
+  out[24] = 0 + i44 * i44;
+  return true;
+}
+
+/**
+ * Solves the factored forest for the targets at F.rhs, for the trees whose
+ * nodes lie in the order from `from` to `to`: every such joint's rows held
+ * exactly together. Leaves each body's velocity change, and each joint's
+ * impulses, at its node in F.vector, for the caller to apply.
+ */
+export function solveForest(world, from, to) {
+  const F = world._joints.forest, T = F.count, order = F.order, parent = F.parent, vec = F.vector;
   const jac = F.jac, inv = F.inverse, D = F.jointInverse, up = F.up, down = F.down, rhs = F.rhs;
   const first = F.first, next = F.next, rows = F.rows, side = F.side;
   // As in factorForest, every sum keeps the plain loop's order and 0 start;
   // only the index arithmetic is hoisted, and sums over 6 unrolled.
   // Forward, children first: w = b - Σ H D⁻¹ w over the children. A body's
   // b is 0, a joint's -rhs, and H between them -J (or -Jᵀ).
-  for (let i = n - 1; i >= 0; i--) {
+  for (let i = to - 1; i >= from; i--) {
     const x = order[i], v = NODE * x;
     if (x >= T) {
       const k = x - T;
-      vec.fill(0, v, v + 6);
+      vec[v] = 0; vec[v + 1] = 0; vec[v + 2] = 0; vec[v + 3] = 0; vec[v + 4] = 0; vec[v + 5] = 0;
       for (let e = first[k] - 1; e >= 0; e = next[e] - 1) {
         const t = e >> 1;
         if (parent[t] !== x) continue;
@@ -572,7 +681,7 @@ export function solveForest(world) {
     }
   }
   // Back, parents first: z = D⁻¹ (w - H z_parent).
-  for (let i = 0; i < n; i++) {
+  for (let i = from; i < to; i++) {
     const x = order[i], v = NODE * x, p = parent[x];
     if (x >= T) {
       const k = x - T;
@@ -620,7 +729,7 @@ function product(a, ao, rows, inner, b, bo, cols, out) {
 
 /** A body's inverse mass matrix, into out at p: 1/m on the diagonal for moving, its world inverse inertia for turning. */
 function inverseMass(im, invI, o, out, p) {
-  out.fill(0, p, p + 36);
+  for (let q = p; q < p + 36; q++) out[q] = 0;
   out[p] = im; out[p + 7] = im; out[p + 14] = im;
   out[p + 21] = invI[o]; out[p + 22] = invI[o + 1]; out[p + 23] = invI[o + 2];
   out[p + 27] = invI[o + 1]; out[p + 28] = invI[o + 3]; out[p + 29] = invI[o + 4];

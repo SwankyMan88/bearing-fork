@@ -1,11 +1,11 @@
 // A world's worker (see core/jobs.js): it takes the shared buffers it is
 // sent, reports ready once, and runs its share of each dispatch. It imports
-// the very functions the calling thread runs (contact.js, JOBS), and holds no
+// the very functions the calling thread runs (joints.js, JOBS), and holds no
 // logic of its own: anything that lived here would be something one thread
 // doesn't do, and the two would sooner or later disagree.
 
 import { work, report } from './core/jobs.js';
-import { JOBS } from './contact.js';
+import { JOBS } from './joints.js';
 
 let reported = false;
 

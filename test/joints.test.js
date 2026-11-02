@@ -1040,7 +1040,7 @@ await testAsync('a ragdoll on its motors steps to the same bits with no workers 
     return world;
   };
   const one = make(0), many = make('auto');
-  many._jobs.least = [1, 1, 1, 1];
+  many._jobs.least = many._jobs.least.map(() => 1);
   // In step until the workers have started (the first touch) and are ready.
   for (let s = 0; s < 120 && many._jobs.control === null; s++) { one.step(DT); many.step(DT); }
   assert.ok(await many._jobs.ready(), 'the workers never reported ready');

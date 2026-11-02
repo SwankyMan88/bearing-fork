@@ -37,9 +37,11 @@
 //   together (STAY, from begin() to end()), and sleep in Atomics.wait the
 //   rest of the time. The solve dispatches once per colour per pass, 150 to
 //   200 times a step, and a worker woken from Atomics.wait takes about 9 us to
-//   answer: more than a small colour's whole pass. But the joints run on the
-//   stepping thread alone, between the contact passes, and workers spinning
-//   through them slowed it though they touched none of it: 32 ragdolls, whose
+//   answer: more than a small colour's whole pass. But a world of few joint
+//   groups runs its joints on the stepping thread alone, between the contact
+//   passes (joints.js, WORK), and workers spinning through such a stretch
+//   slowed it though they touched none of it: 32 ragdolls, when their joints
+//   all ran on one thread, whose
 //   joints are half the step, took up to 1.45 times as long a step with 7
 //   workers as with none, their joints twice as long (Node, i7-1260P).
 //   Spinning cores share the chip's power and turbo with the stepping thread,
@@ -204,6 +206,9 @@ export class Jobs {
     this.least = work.least;
     this.columns = work.columns;
     this.pairs = work.pairs;
+    /** The joints' arrays the jobs read, and the forest's (joints.js, WORK). */
+    this.joints = work.joints;
+    this.forest = work.forest;
     this.count = count;
     this.url = url;
     this.control = null;
@@ -281,6 +286,9 @@ export class Jobs {
   start(world, c) {
     for (const name of this.columns) world[name] = share(world[name]);
     for (const name of this.pairs) world._pairs[name] = share(world._pairs[name]);
+    const J = world._joints;
+    for (const name of this.joints) J[name] = share(J[name]);
+    for (const name of this.forest) J.forest[name] = share(J.forest[name]);
     this.keys = [];
     for (const key of Object.keys(c)) {
       if (!ArrayBuffer.isView(c[key])) continue;
@@ -288,8 +296,9 @@ export class Jobs {
       c[key] = share(c[key]);
     }
     this.control = new Int32Array(new SHARED(SLOTS * 4));
-    // contact.js says which is which: 0 to 4 the solve's, 5 to 9 the narrowphase's.
-    this.args = new Float64Array(new SHARED(10 * 8));
+    // contact.js says which is which: 0 to 4 the solve's, 5 to 9 the
+    // narrowphase's; joints.js 10 to 19.
+    this.args = new Float64Array(new SHARED(20 * 8));
     for (let i = 0; i < this.count; i++) {
       let worker = null;
       // Refused, say, by Node's permission model without --allow-worker.
@@ -318,17 +327,24 @@ export class Jobs {
    */
   send(world, c) {
     const columns = this.columns, pairs = this.pairs, keys = this.keys, sent = this.sent, list = world._pairs;
+    const joints = this.joints, forest = this.forest, J = world._joints, F = J.forest;
     let moved = sent.length === 0, i = 0;
     for (let k = 0; k < columns.length && !moved; k++) moved = sent[i++] !== world[columns[k]];
     for (let k = 0; k < pairs.length && !moved; k++) moved = sent[i++] !== list[pairs[k]];
+    for (let k = 0; k < joints.length && !moved; k++) moved = sent[i++] !== J[joints[k]];
+    for (let k = 0; k < forest.length && !moved; k++) moved = sent[i++] !== F[forest[k]];
     for (let k = 0; k < keys.length && !moved; k++) moved = sent[i++] !== c[keys[k]];
     if (!moved) return;
-    // A worker's world: the columns, the pair list's, and a gravity of its
-    // own that the jobs fill in from args (contact.js, lookRows).
-    const views = { _pairs: {}, _gravity: [0, 0, 0] }, rows = {};
+    // A worker's world: the columns, the pair list's, the joints' and their
+    // forest's, and a gravity of its own that the jobs fill in from args
+    // (contact.js, lookRows); the numbers the joints' jobs read besides come
+    // in args too (joints.js).
+    const views = { _pairs: {}, _gravity: [0, 0, 0], _joints: { pose: 0, forest: { count: 0 } } }, rows = {};
     sent.length = 0;
     for (const name of columns) sent.push(views[name] = world[name]);
     for (const name of pairs) sent.push(views._pairs[name] = list[name]);
+    for (const name of joints) sent.push(views._joints[name] = J[name]);
+    for (const name of forest) sent.push(views._joints.forest[name] = F[name]);
     for (const key of keys) sent.push(rows[key] = c[key]);
     const revision = Atomics.add(this.control, DATA, 1) + 1;
     const message = { control: this.control, args: this.args, world: views, c: rows, revision };

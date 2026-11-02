@@ -55,7 +55,7 @@ await withWorkers('a world of everything steps to the same bits with 0, 2 and 4 
   // steps prepare on one thread), a mesh, a heightfield, joints, a
   // character, a sensor and a kinematic platform.
   const worlds = [0, 2, 4].map((workers) => mixed({ workers }).world);
-  for (const w of worlds.slice(1)) w._jobs.least = [1, 1, 1, 1];
+  for (const w of worlds.slice(1)) w._jobs.least = w._jobs.least.map(() => 1);
   // In step, until the workers have started and are ready.
   for (const w of worlds) w.step(DT);
   for (const w of worlds.slice(1)) assert.ok(await w._jobs.ready(), 'the workers never reported ready');
@@ -94,7 +94,47 @@ await withWorkers('so does a landing pile of 1,000 boxes, at the thresholds as t
   four.destroy();
 });
 
-await withWorkers('workers sleep through the joints, which run on one thread', async () => {
+await withWorkers('the joints of standing ragdolls go to the workers, by group and by tree, to the same bits', async () => {
+  // Twelve of compare.html's ragdolls held in their pose by drives on every
+  // joint, falling with no floor: no contact, so whatever goes to the
+  // workers is the joints' (joints.js, groupJoints()), at the thresholds as
+  // they ship. Each ragdoll is a group and a tree.
+  const PARTS = [[[0.32, 0.2, 0.2], [0, 1, 0]], [[0.36, 0.45, 0.22], [0, 1.325, 0]], [[0.2, 0.24, 0.22], [0, 1.67, 0]],
+    [[0.28, 0.1, 0.1], [-0.32, 1.5, 0]], [[0.26, 0.08, 0.08], [-0.59, 1.5, 0]], [[0.28, 0.1, 0.1], [0.32, 1.5, 0]],
+    [[0.26, 0.08, 0.08], [0.59, 1.5, 0]], [[0.14, 0.44, 0.14], [-0.09, 0.68, 0]], [[0.12, 0.44, 0.12], [-0.09, 0.24, 0]],
+    [[0.14, 0.44, 0.14], [0.09, 0.68, 0]], [[0.12, 0.44, 0.12], [0.09, 0.24, 0]]];
+  const JOINTS = [['ball', 1, 0, [0, 1.1, 0]], ['ball', 2, 1, [0, 1.55, 0]], ['ball', 3, 1, [-0.18, 1.5, 0]],
+    ['hinge', 4, 3, [-0.46, 1.5, 0], [0, 1, 0]], ['ball', 5, 1, [0.18, 1.5, 0]], ['hinge', 6, 5, [0.46, 1.5, 0], [0, 1, 0]],
+    ['ball', 7, 0, [-0.09, 0.9, 0]], ['hinge', 8, 7, [-0.09, 0.46, 0], [1, 0, 0]], ['ball', 9, 0, [0.09, 0.9, 0]],
+    ['hinge', 10, 9, [0.09, 0.46, 0], [1, 0, 0]]];
+  const make = (workers) => {
+    const world = new World({ workers, sleeping: false });
+    for (let r = 0; r < 12; r++) {
+      const at = (p) => [p[0] + (r % 4) * 1.6, p[1], p[2] + Math.floor(r / 4) * 1.2];
+      const b = PARTS.map(([size, p], k) => world.addBody({ size, position: at(p), angularVelocity: [0.1 * k, 0.3, -0.2 * r] }));
+      for (const [type, a, bb, p, axis] of JOINTS) {
+        world.addJoint({ type, a: b[a], b: b[bb], anchor: at(p), ...(axis ? { axis } : {}), target: type === 'hinge' ? 0.2 : [0, 0, 0.1, 1], motorForce: 300, frequency: 0 });
+      }
+      world.addJoint({ type: 'rotation', a: b[0], target: [0, 0, 0, 1], motorForce: 300, frequency: 0 });
+    }
+    return world;
+  };
+  const one = make(0), two = make(2);
+  assert.ok(await started(two), 'the workers never started or reported ready');
+  while (one.stepCount < two.stepCount) one.step(DT);
+  for (let n = 0; n < 120; n++) {
+    one.step(DT);
+    two.step(DT);
+  }
+  assert.equal(state(two), state(one));
+  assert.deepEqual(Array.from(two._velocity), Array.from(one._velocity));
+  assert.equal(two._drives, one._drives, 'the drives counted');
+  assert.ok(two._jobs.parallel > 1000, `only ${two._jobs.parallel} dispatches went to the workers`);
+  one.destroy();
+  two.destroy();
+});
+
+await withWorkers('workers sleep through a long stretch the stepping thread works alone', async () => {
   // Left spinning through a long joint pass, they slowed the stepping thread
   // (core/jobs.js, LULL_MS): a step's window opened, and a lull begun on a
   // stretch that last took 1 ms, twenty times the bound; no dispatch for 50 ms.

@@ -33,7 +33,7 @@ import { Broadphase } from './broadphase.js';
 import { Tree } from './tree.js';
 import { Pairs, Memory } from './pairs.js';
 import { Contacts, RECORD } from './contact.js';
-import { Joints } from './joints.js';
+import { Joints, KEEP } from './joints.js';
 import { Forest } from './forest.js';
 import { Events } from './events.js';
 import { Mesh, Heightfield } from './mesh.js';
@@ -87,7 +87,8 @@ const SCRATCH = {
   World: new Set(['_lines', '_placed', '_colours', '_invIt', '_workers', '_jobs']),
   Contacts: new Set(['jac', 'fjac', 'block', 'colour', 'order', 'row', 'scratch', 'starts', 'digits', 'onParts', 'plain', 'wasPlain', 'records', 'taken', 'now', 'solved']),
   Pairs: new Set(['verdict']),
-  Forest: new Set(['fresh', 'since']),
+  Forest: new Set(['fresh', 'since', 'start', 'trees']),
+  Joints: new Set(['kept', 'work', 'pose', 'union', 'label', 'of', 'starts', 'grouped', 'groups', 'drives']),
 };
 
 /** The world as plain, JSON-safe data. */
@@ -188,7 +189,13 @@ export function load(data, World) {
       o.records = new Float64Array(o.a.length * RECORD); o.taken = new Int32Array(1); o.now = new Float64Array(o.normalMass.length);
     }
     for (const o of made) if (o instanceof Pairs) o.verdict = new Int32Array(o.a.length);
-    for (const o of made) if (o instanceof Forest) { o.fresh = new Uint8Array(o.order.length); o.since = new Float64Array(o.body.length * 4); }
+    for (const o of made) {
+      if (!(o instanceof Joints)) continue;
+      const n = o.type.length;
+      o.kept = new Float64Array(n); o.work = new Float64Array(n * KEEP);
+      o.union = new Int32Array(2 * n); o.label = new Int32Array(2 * n); o.of = new Int32Array(n); o.starts = new Int32Array(2 * n); o.grouped = new Int32Array(n);
+    }
+    for (const o of made) if (o instanceof Forest) { o.fresh = new Uint8Array(o.order.length); o.since = new Float64Array(o.body.length * 4); o.start = new Int32Array(o.order.length); }
     return made[0];
   } catch (e) {
     return fail('load', `data is damaged: ${e.message}`);

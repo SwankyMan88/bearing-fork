@@ -62,7 +62,7 @@ import { atan2, rotate } from './core/math.js';
 import { Slots, resized, MAX_SLOTS } from './core/slots.js';
 import { Body } from './body.js';
 import { Forest, plant, factorForest, solveForest, inverseSPD, NODE } from './forest.js';
-import { PIXEL } from './contact.js';
+import { PIXEL, WORK as CONTACT_WORK } from './contact.js';
 
 export const TYPES = ['fixed', 'ball', 'hinge', 'slider', 'distance', 'rotation'];
 const FIXED = 0, BALL = 1, HINGE = 2, SLIDER = 3, DISTANCE = 4;
@@ -124,7 +124,28 @@ const COLUMNS = [
   ['next', Int32Array, 2],        // the next joint in a's list and in b's, as an edge (2j + side) plus 1
   ['impulse', Float64Array, IMPULSES],
   ['list', Int32Array, 1],        // the joints solved this step, dense: see gather()
+  // What a joint worked out from its bodies' pose alone, and the pose it was
+  // kept at: see KEPT WORK. Scratch to save().
+  ['kept', Float64Array, 1],
+  ['work', Float64Array, 64],     // KEEP
+  // Groups of joints that share no body the solve moves (groupJoints()):
+  // scratch to save().
+  ['union', Int32Array, 2],       // by body node, union-find
+  ['label', Int32Array, 2],       // by body node, its group; then each group's next place
+  ['of', Int32Array, 1],          // by listed joint: its body node, then its group
+  ['starts', Int32Array, 2],      // each group's first place in grouped, and then the end
+  ['grouped', Int32Array, 1],     // the listed joints, group by group, in list order within each
 ];
+
+/**
+ * Numbers a joint keeps of its kept work (KEPT WORK): a hinge's six rows (54),
+ * its pinned rows' share of its motor's push (5), that row's effective mass,
+ * the hinge's angle and how many rows are pinned; or a ball or rotation
+ * joint's error (3), its turning rows' coupling (9), whether that was
+ * inverted, how many rows are pinned, their share (9) and the rows (27). The
+ * larger, 62, rounded up to a power of two.
+ */
+export const KEEP = 64;
 
 /**
  * How much of a tree joint's error the solve pass asks back each substep:
@@ -155,7 +176,14 @@ export class Joints {
     this.length = null; this.cone = null; this.motorSpeed = null; this.motorForce = null;
     this.friction = null; this.frequency = null; this.dampingRatio = null; this.target = null;
     this.collide = null; this.next = null; this.impulse = null; this.list = null;
+    this.kept = null; this.work = null; this.union = null; this.label = null; this.of = null;
+    this.starts = null; this.grouped = null;
     for (const [name, Type] of COLUMNS) this[name] = new Type(0);
+    /** How many groups this step's joints fall into, and how many of them drive to a target (groupJoints()). Scratch to save(). */
+    this.groups = 0;
+    this.drives = 0;
+    /** The bodies' pose this step, numbered: moved on by World.step whenever they move (KEPT WORK). Scratch to save(). */
+    this.pose = 0;
     /** How many joints are in `list` this step. */
     this.active = 0;
     /** The trees among them, solved exactly (forest.js). */
@@ -691,9 +719,14 @@ const spring = { biasRate: 0, massScale: 1, impulseScale: 0 };
  * of the rows and a solve a substep, 15% of a jointed scene.
  */
 export function warmStartJoints(world) {
-  const J = world._joints, list = J.list, n = J.active, acc = J.impulse, tree = J.forest.inTree;
-  for (let i = 0; i < n; i++) {
-    const j = list[i], type = J.type[j], o = j * IMPULSES;
+  run(world, WARM_GROUPS, world._joints.groups, argsOf(world));
+}
+
+/** warmStartJoints() for the grouped joints from..to-1 (groupJoints()). */
+function warmJoints(world, J, from, to) {
+  const acc = J.impulse, tree = J.forest.inTree, grouped = J.grouped;
+  for (let i = from; i < to; i++) {
+    const j = grouped[i], type = J.type[j], o = j * IMPULSES;
     // A held-down, touching tree's rows start each substep from none; the forest's
     // solves add this substep's (settleForest), kept for save() and for a
     // joint that leaves the tree. The pinned rows' share of a stop's or a
@@ -756,20 +789,44 @@ export function warmStartJoints(world) {
  * springs) come first and the rows that must hold come last, so what holds
  * is solved against everything else's latest push: Box2D's order. `again`
  * is true after a step's first substep, when the trees may keep their factor
- * (holdForest()).
+ * (holdTrees()); `keep` is true in a relax pass whose kept work the next
+ * solve pass reads (KEPT WORK). The rows solved one joint at a time go by
+ * groups and the trees by tree, on every thread if the workers are live
+ * (groupJoints()).
  */
-export function solveJoints(world, h, bias, again = false) {
-  const J = world._joints, list = J.list, n = J.active, acc = J.impulse, tree = J.forest.inTree;
-  for (let i = 0; i < n; i++) {
-    const j = list[i], o = j * IMPULSES, type = J.type[j], held = tree[j] !== 0;
+export function solveJoints(world, h, bias, again = false, keep = false) {
+  const J = world._joints, F = J.forest, args = argsOf(world);
+  args[H] = h; args[BIAS] = bias ? 1 : 0; args[AGAIN] = again ? 1 : 0; args[STORE] = keep ? 1 : 0; args[POSE] = J.pose;
+  args[SOFT] = jointSoft.biasRate; args[SOFT + 1] = jointSoft.massScale; args[SOFT + 2] = jointSoft.impulseScale;
+  args[TREE_JOINTS] = F.count;
+  run(world, SOLVE_GROUPS, J.groups, args);
+  // Counted here, for every thread: each a drive solved this pass.
+  world._drives += J.drives;
+  if (F.count > 0) run(world, TREES, F.trees, args);
+}
+
+/** solveJoints()'s pass for the grouped joints from..to-1 (groupJoints()): their rows solved one joint at a time. */
+function solveRange(world, J, from, to, h, bias, keep) {
+  const acc = J.impulse, tree = J.forest.inTree, kept = J.kept, pose = J.pose, grouped = J.grouped;
+  for (let i = from; i < to; i++) {
+    const j = grouped[i], o = j * IMPULSES, type = J.type[j], held = tree[j] !== 0;
     // A fixed joint in a tree has nothing that gives: the forest holds it all.
     // Nor has a rotation joint there, which is only in a tree while it holds.
     if (held && (type === FIXED || type === ROTATION)) continue;
+    // Nor has a ball joint or hinge there with no motor, friction or stop:
+    // loaded and saved, its bodies' velocities would only be written back as
+    // they were.
+    if (held && idle(J, j, type)) continue;
     base = o;
     pins = type === FIXED || type === DISTANCE || type === ROTATION ? 0 : -1;
     pinType = type;
     load(world, j);
-    geometry(world, j);
+    // Work kept at this pose by the last relax pass is read back in place of
+    // the anchors, axes and rows it was made from (KEPT WORK).
+    const keeps = keeping(J, j, type, held);
+    const recall = keeps && bias && kept[j] === pose;
+    const store = keeps && keep;
+    if (!recall) geometry(world, j);
     switch (type) {
       case FIXED:
         frames(world, j);
@@ -781,9 +838,9 @@ export function solveJoints(world, h, bias, again = false) {
         // hinge's at motorSpeed 0 (driven()), and a ball joint has no speed.
         const aims = aimed(J, j), most = J.motorForce[j] > 0 ? J.motorForce[j] : J.friction[j];
         if (aims) {
-          frames(world, j);
-          turnDrive(world, J, j, most * h, h, bias, acc, o);
-        } else if (most > 0) ballFriction(most * h, acc, o);
+          if (!recall) frames(world, j);
+          turnDrive(world, J, j, most * h, h, bias, acc, o, turned(world, J, j, true, recall, store));
+        } else if (most > 0) ballFriction(most * h, acc, o, turned(world, J, j, false, recall, store));
         if (swings(J, j)) {
           if (!aims) frames(world, j);
           twistLimits(J, j, acc, o, h, bias);
@@ -793,10 +850,17 @@ export function solveJoints(world, h, bias, again = false) {
         break;
       }
       case HINGE:
+        if (keeps) {
+          // In a tree, with a motor or friction and no stops: its kept work
+          // (hinged()) is all its pass needs.
+          hinged(world, J, j, recall, store);
+          driven(world, j, h, acc, o, bias, true);
+          break;
+        }
         frames(world, j);
         if (J.motorForce[j] > 0 || J.friction[j] > 0) {
           axle(0);
-          driven(world, j, h, acc, o, bias);
+          driven(world, j, h, acc, o, bias, false);
         }
         hingeLimits(J, j, acc, o, h, bias);
         if (!held) {
@@ -809,7 +873,7 @@ export function solveJoints(world, h, bias, again = false) {
         reach();
         if (J.motorForce[j] > 0 || J.friction[j] > 0) {
           slide(0);
-          driven(world, j, h, acc, o, bias);
+          driven(world, j, h, acc, o, bias, false);
         }
         sliderLimits(J, j, acc, o, h, bias);
         if (!held) {
@@ -818,11 +882,11 @@ export function solveJoints(world, h, bias, again = false) {
         }
         break;
       case ROTATION:
-        frames(world, j);
+        if (!recall) frames(world, j);
         if (gives(J, j)) {
           const most = J.motorForce[j] > 0 ? J.motorForce[j] : J.friction[j];
-          if (aimed(J, j)) turnDrive(world, J, j, most * h, h, bias, acc, o);
-          else ballFriction(most * h, acc, o);
+          if (aimed(J, j)) turnDrive(world, J, j, most * h, h, bias, acc, o, turned(world, J, j, true, recall, store));
+          else ballFriction(most * h, acc, o, turned(world, J, j, false, recall, store));
           if (J.cone[j] < Math.PI) coneLimit(J, j, acc, o, h, bias);
         } else {
           holdAngles(acc, o, bias);
@@ -833,7 +897,6 @@ export function solveJoints(world, h, bias, again = false) {
     }
     save(world, j);
   }
-  if (J.forest.count > 0) holdForest(world, h, bias, again);
 }
 
 /**
@@ -848,6 +911,106 @@ function holds(J, j) {
   return low(DISTANCE, J.given[j], J.min[j], length, f) === high(DISTANCE, J.given[j], J.max[j], length, f);
 }
 
+/**
+ * Whether a ball joint or hinge in a tree has nothing to solve one joint at a
+ * time: no motor, no friction and no stops. The forest holds the rest.
+ */
+function idle(J, j, type) {
+  if (type === BALL) return !gives(J, j) && !swings(J, j);
+  if (type === HINGE) return !gives(J, j) && (J.given[j] & (MIN | MAX)) === 0;
+  return false;
+}
+
+// KEPT WORK. Only World._move moves the bodies within a step, and it runs
+// between each substep's solve pass and its relax pass. So a substep's relax
+// pass and the next substep's solve pass find every body where it is, turned
+// as it is, with the same inertias (contact.js, turnedInertias()), and what a
+// joint works out from that alone, its rows, their couplings and the
+// inverses of those, and its drive's error, comes out the same to the bit
+// both times. The relax pass keeps it, by joint, and the next solve pass
+// reads it back: at 8 substeps the bodies take 9 poses a step, and this work
+// is done 9 times, not 16. J.pose numbers the poses (World.step moves it on
+// as the step begins and after each move), and J.kept is the pose a joint's
+// work was kept at, so nothing kept at another pose, or in another step, is
+// ever read. Kept for the joints whose pass is then all velocity work: a
+// ball joint in a tree with a drive or friction and no stops, a rotation
+// joint with a drive or friction and no cone, and a hinge in a tree with a
+// motor, drive or friction and no stops. The rest work it out every pass, as
+// before. The same operations either way, so the same bits.
+
+/** Whether joint slot j keeps its work (KEPT WORK). */
+function keeping(J, j, type, held) {
+  if (type === BALL) return held && gives(J, j) && !swings(J, j);
+  if (type === ROTATION) return gives(J, j) && !(J.cone[j] < Math.PI);
+  if (type === HINGE) return held && gives(J, j) && (J.given[j] & (MIN | MAX)) === 0;
+  return false;
+}
+
+/**
+ * A ball or rotation joint's turning rows where its bodies are (spinPose()),
+ * and its error from its target if it `aims` (turnError()), read back if
+ * `recall`, kept if `store`; returns whether their coupling was inverted.
+ * frames() has been run unless recalling.
+ */
+function turned(world, J, j, aims, recall, store) {
+  const work = J.work, w = KEEP * j;
+  if (recall) {
+    if (aims) { ERR[0] = work[w]; ERR[1] = work[w + 1]; ERR[2] = work[w + 2]; }
+    for (let k = 0; k < 9; k++) K3[k] = work[w + 3 + k];
+    pins = work[w + 13];
+    for (let k = 0; k < 9; k++) SHARE[k] = work[w + 14 + k];
+    for (let k = 0, n = 9 * pins; k < n; k++) ROWS[9 + k] = work[w + 23 + k];
+    spinRows();
+    return work[w + 12] === 1;
+  }
+  if (aims) turnError(world, J, j);
+  const inverted = spinPose();
+  if (store) {
+    work[w] = ERR[0]; work[w + 1] = ERR[1]; work[w + 2] = ERR[2];
+    for (let k = 0; k < 9; k++) work[w + 3 + k] = K3[k];
+    work[w + 12] = inverted ? 1 : 0;
+    work[w + 13] = pins;
+    for (let k = 0; k < 9; k++) work[w + 14 + k] = SHARE[k];
+    for (let k = 0, n = 9 * pins; k < n; k++) work[w + 23 + k] = ROWS[9 + k];
+    J.kept[j] = J.pose;
+  }
+  return inverted;
+}
+
+/**
+ * A hinge's motor row (axle()), its pinned rows (pin()), that row's effective
+ * mass with them holding and their share of its push (free()), and its angle
+ * if it has a target (twist()), into ROWS, MU and HINGED; read back if
+ * `recall`, kept if `store`.
+ */
+function hinged(world, J, j, recall, store) {
+  const work = J.work, w = KEEP * j;
+  if (recall) {
+    for (let k = 0; k < 54; k++) ROWS[k] = work[w + k];
+    for (let k = 0; k < 5; k++) MU[k] = work[w + 54 + k];
+    HINGED[0] = work[w + 59];
+    HINGED[1] = work[w + 60];
+    pins = work[w + 61];
+    KIND[0] = AXIS1; KIND[1] = AXIS2; KIND[2] = PT; KIND[3] = PT + 1; KIND[4] = PT + 2;
+    return;
+  }
+  frames(world, j);
+  axle(0);
+  pin(HINGE);
+  HINGED[0] = free(0);
+  HINGED[1] = (J.given[j] & TARGET) !== 0 && J.motorForce[j] > 0 ? twist() : 0;
+  if (store) {
+    for (let k = 0; k < 54; k++) work[w + k] = ROWS[k];
+    for (let k = 0; k < 5; k++) work[w + 54 + k] = MU[k];
+    work[w + 59] = HINGED[0];
+    work[w + 60] = HINGED[1];
+    work[w + 61] = pins;
+    J.kept[j] = J.pose;
+  }
+}
+/** hinged()'s effective mass of the motor row, and the hinge's angle. */
+const HINGED = new Float64Array(2);
+
 /** This step's trees, from the joints gather() listed: see forest.js. */
 export function plantJoints(world) {
   PLANTING = world._joints;
@@ -860,8 +1023,9 @@ const planted = (j) => holds(PLANTING, j);
 const pointed = (j) => PLANTING.type[j] !== ROTATION;
 
 /**
- * Every tree joint's rows that must hold, solved exactly together
- * (forest.js). The solve pass builds the rows from where the bodies are,
+ * The rows that must hold of trees `first` to `last` - 1, whose nodes lie
+ * together in the order, solved exactly together (forest.js). Each tree is
+ * held on its own, sharing no body with another, so by any thread. The solve pass builds the rows from where the bodies are,
  * factors them, and asks each for its whole error back this substep,
  * JOINT_BIAS of it; the relax pass, after the bodies have moved, solves the
  * same rows again for no speed along them.
@@ -882,15 +1046,17 @@ const pointed = (j) => PLANTING.type[j] !== ROTATION;
  * they had stood and took the free swing across them for error: a floating
  * leg kept 60% of its energy over a minute, not 93%.
  */
-function holdForest(world, h, bias, again) {
-  const J = world._joints, F = J.forest, T = F.count;
+function holdTrees(world, first, last, h, bias, again) {
+  const J = world._joints, F = J.forest, T = F.count, order = F.order, from = F.start[first], to = F.start[last];
   if (bias) {
-    age(world, !again);
-    build(world, JOINT_BIAS / h);
-    factorForest(world);
+    for (let r = first; r < last; r++) age(world, F.start[r], F.start[r + 1], !again);
+    build(world, from, to, JOINT_BIAS / h);
+    factorForest(world, from, to);
   } else {
     const v = world._velocity, w = world._angular, row = F.row;
-    for (let t = 0; t < T; t++) {
+    for (let i = from; i < to; i++) {
+      const t = order[i];
+      if (t >= T) continue;
       const j = F.joint[t], a3 = 3 * J.a[j], b = J.b[j], b3 = 3 * b;
       for (let r = 0; r < F.rows[t]; r++) {
         const o = 54 * t + 9 * r;
@@ -904,7 +1070,7 @@ function holdForest(world, h, bias, again) {
       }
     }
   }
-  settleForest(world);
+  settleForest(world, from, to);
 }
 
 /**
@@ -925,8 +1091,9 @@ function holdForest(world, h, bias, again) {
 const KEPT = 1 - PIXEL / 8;
 
 /**
- * Marks each tree in F.fresh to be factored at this solve pass, or to keep
- * its factor: `all` at a step's first substep, and after that a tree one of
+ * Marks the tree whose nodes lie in the order from `from` to `to` in F.fresh
+ * to be factored at this solve pass, or to keep its factor: `all` at a
+ * step's first substep, and after that a tree one of
  * whose bodies has turned past KEPT since its factor was made, whose
  * rotations F.since keeps, and every substep a tree held at two or more
  * points. Such a tree can have rows that repeat one another (a bridge fixed
@@ -940,12 +1107,11 @@ const KEPT = 1 - PIXEL / 8;
  * holds no point: its rows hold the body's turn to the world's, and repeat
  * any other joint's that does too (a hinge to the world beside it).
  */
-function age(world, all) {
-  const F = world._joints.forest, T = F.count, order = F.order, parent = F.parent, side = F.side, fresh = F.fresh, since = F.since, q = world._rotation;
-  // Each tree's nodes lie together in the order, its root, a body, first.
-  let end = F.nodes;
-  for (let i = end - 1; i >= 0; i--) {
-    if (parent[order[i]] !== -1) continue;
+function age(world, from, to, all) {
+  const F = world._joints.forest, T = F.count, order = F.order, side = F.side, fresh = F.fresh, since = F.since, q = world._rotation;
+  // A tree's nodes lie together in the order, its root, a body, first.
+  {
+    const i = from, end = to;
     let again = all, held = 0;
     for (let k = i; k < end; k++) {
       const x = order[k];
@@ -966,14 +1132,15 @@ function age(world, all) {
         since[o] = q[s4]; since[o + 1] = q[s4 + 1]; since[o + 2] = q[s4 + 2]; since[o + 3] = q[s4 + 3];
       }
     }
-    end = i;
   }
 }
 
-/** Every forest joint's rows, from where its bodies are now, into F.row, with their targets. */
-function build(world, rate) {
-  const J = world._joints, F = J.forest, T = F.count;
-  for (let t = 0; t < T; t++) {
+/** The tree's joints' rows (order from `from` to `to`), from where its bodies are now, into F.row, with their targets. */
+function build(world, from, to, rate) {
+  const J = world._joints, F = J.forest, T = F.count, order = F.order;
+  for (let i = from; i < to; i++) {
+    const t = order[i];
+    if (t >= T) continue;
     const j = F.joint[t], type = J.type[j];
     load(world, j);
     geometry(world, j);
@@ -984,7 +1151,7 @@ function build(world, rate) {
       rotate(QA, 0, REL[0], REL[1], REL[2], false, C);
       for (let k = 0; k < 3; k++) {
         const r = 9 * k;
-        ROWS.fill(0, r, r + 9);
+        clear(r);
         ROWS[r + 3 + k] = 1;
         ROWS[r + 6 + k] = 1;
         m = emit(F, t, m, r, 2 * C[k], rate);
@@ -1011,7 +1178,7 @@ function build(world, rate) {
       m = emit(F, t, m, 9, D[0] * P2[0] + D[1] * P2[1] + D[2] * P2[2], rate);
     } else if (type === DISTANCE) {
       const l = stretch(0);
-      if (l === 0) ROWS.fill(0, 0, 9);
+      if (l === 0) clear(0);
       const f = J.frequency[j], length = J.length[j];
       m = emit(F, t, m, 0, l - low(DISTANCE, J.given[j], J.min[j], length, f), rate);
     }
@@ -1020,18 +1187,20 @@ function build(world, rate) {
 }
 
 
-/** Solves the factored forest and applies it: each body's change of velocity, and each joint's impulses, kept for the warm start. */
-function settleForest(world) {
-  const J = world._joints, F = J.forest, acc = J.impulse, T = F.count;
-  solveForest(world);
-  // Each body's change of velocity, then each joint's impulses, kept for the warm start.
+/** Solves the factored tree (order from `from` to `to`) and applies it: each body's change of velocity, and each joint's impulses, kept for the warm start. */
+function settleForest(world, from, to) {
+  const J = world._joints, F = J.forest, acc = J.impulse, T = F.count, order = F.order;
+  solveForest(world, from, to);
+  // Each body's change of velocity, and each joint's impulses, kept for the warm start.
   const v = world._velocity, w = world._angular, vec = F.vector;
-  for (let k = 0; k < F.bodies; k++) {
-    const s3 = 3 * F.body[k], o = NODE * (T + k);
-    v[s3] += vec[o]; v[s3 + 1] += vec[o + 1]; v[s3 + 2] += vec[o + 2];
-    w[s3] += vec[o + 3]; w[s3 + 1] += vec[o + 4]; w[s3 + 2] += vec[o + 5];
-  }
-  for (let t = 0; t < T; t++) {
+  for (let i = from; i < to; i++) {
+    const t = order[i];
+    if (t >= T) {
+      const s3 = 3 * F.body[t - T], o = NODE * t;
+      v[s3] += vec[o]; v[s3 + 1] += vec[o + 1]; v[s3 + 2] += vec[o + 2];
+      w[s3] += vec[o + 3]; w[s3 + 1] += vec[o + 4]; w[s3 + 2] += vec[o + 5];
+      continue;
+    }
     // The directions the impulses were applied along are the factor's rows,
     // b's side of F.jac (forest.js, shape()), which a kept factor holds from
     // when it was made (age()); F.row is this pass's.
@@ -1064,7 +1233,8 @@ function emit(F, t, m, o, c, rate) {
   const row = F.row, r = 54 * t + 9 * m;
   for (let k = 0; k < 9; k++) row[r + k] = ROWS[o + k];
   F.rhs[6 * t + m] = -(speed(o) + rate * c);
-  F.scale[t] += coupling(o, o);
+  // The scale is read only where the tree is factored afresh (forest.js, GIVE).
+  if (F.fresh[t] !== 0) F.scale[t] += coupling(o, o);
   return m + 1;
 }
 
@@ -1080,26 +1250,33 @@ function load(world, j) {
   const a3 = 3 * a, a6 = 6 * a;
   VA[0] = v[a3]; VA[1] = v[a3 + 1]; VA[2] = v[a3 + 2]; VA[3] = w[a3]; VA[4] = w[a3 + 1]; VA[5] = w[a3 + 2];
   if (type[a] === DYNAMIC) for (let k = 0; k < 6; k++) IA[k] = invI[a6 + k];
-  else IA.fill(0);
+  else for (let k = 0; k < 6; k++) IA[k] = 0;
   ima = world._invMass[a];
   if (b < 0) {
-    VB.fill(0);
-    IB.fill(0);
+    for (let k = 0; k < 6; k++) { VB[k] = 0; IB[k] = 0; }
     imb = 0;
     return;
   }
   const b3 = 3 * b, b6 = 6 * b;
   VB[0] = v[b3]; VB[1] = v[b3 + 1]; VB[2] = v[b3 + 2]; VB[3] = w[b3]; VB[4] = w[b3 + 1]; VB[5] = w[b3 + 2];
   if (type[b] === DYNAMIC) for (let k = 0; k < 6; k++) IB[k] = invI[b6 + k];
-  else IB.fill(0);
+  else for (let k = 0; k < 6; k++) IB[k] = 0;
   imb = world._invMass[b];
 }
 
+/**
+ * The joint's bodies' velocities written back, but for a body that can't
+ * move (inverse mass 0): the solve only ever adds nothing to it, and joints
+ * of two groups (groupJoints()) may share such a body, so with workers
+ * several threads would write it at once. Writing nothing also keeps a -0
+ * velocity -0, where adding 0 times a negative impulse made it +0, so its
+ * sign hung on which joint went last: contact.js's writeBack(), and why.
+ */
 function save(world, j) {
   const J = world._joints, a = J.a[j], b = J.b[j], v = world._velocity, w = world._angular;
   const a3 = 3 * a;
-  v[a3] = VA[0]; v[a3 + 1] = VA[1]; v[a3 + 2] = VA[2]; w[a3] = VA[3]; w[a3 + 1] = VA[4]; w[a3 + 2] = VA[5];
-  if (b < 0) return;
+  if (ima !== 0) { v[a3] = VA[0]; v[a3 + 1] = VA[1]; v[a3 + 2] = VA[2]; w[a3] = VA[3]; w[a3 + 1] = VA[4]; w[a3 + 2] = VA[5]; }
+  if (b < 0 || imb === 0) return;
   const b3 = 3 * b;
   v[b3] = VB[0]; v[b3 + 1] = VB[1]; v[b3 + 2] = VB[2]; w[b3] = VB[3]; w[b3 + 1] = VB[4]; w[b3 + 2] = VB[5];
 }
@@ -1158,15 +1335,165 @@ function swings(J, j) {
   return J.cone[j] < Math.PI || (J.given[j] & (MIN | MAX)) !== 0;
 }
 
+// ---- groups and workers ----
+
+/**
+ * Splits this step's listed joints into groups that share no body the solve
+ * moves: union-find over the dynamic bodies, through every listed joint. A
+ * group's joints keep their list order (J.grouped, from J.starts[g] to
+ * J.starts[g + 1]), so whichever thread solves a group, each of its bodies
+ * takes the same pushes in the same order as one thread going down the list
+ * would give it: the same bits with any number of threads. Also counts the
+ * drives a pass solves, for world._drives. world._node, zeroed after plant(),
+ * is zeroed again after.
+ */
+export function groupJoints(world) {
+  const J = world._joints, list = J.list, n = J.active, node = world._node, type = world._type;
+  const union = J.union, label = J.label, of = J.of, starts = J.starts, grouped = J.grouped;
+  let bodies = 0, drives = 0;
+  for (let i = 0; i < n; i++) {
+    const j = list[i], a = J.a[j], b = J.b[j];
+    if (aimed(J, j)) drives++;
+    let ka = -1, kb = -1;
+    if (type[a] === DYNAMIC) {
+      if (node[a] === 0) { union[bodies] = bodies; node[a] = ++bodies; }
+      ka = node[a] - 1;
+    }
+    if (b >= 0 && type[b] === DYNAMIC) {
+      if (node[b] === 0) { union[bodies] = bodies; node[b] = ++bodies; }
+      kb = node[b] - 1;
+    }
+    if (ka >= 0 && kb >= 0) {
+      const ra = root(union, ka), rb = root(union, kb);
+      if (ra !== rb) union[rb] = ra;
+    }
+    // gather() lists no joint without a dynamic body.
+    of[i] = ka >= 0 ? ka : kb;
+  }
+  for (let k = 0; k < bodies; k++) label[k] = -1;
+  let groups = 0;
+  for (let i = 0; i < n; i++) {
+    const r = root(union, of[i]);
+    if (label[r] < 0) label[r] = groups++;
+    of[i] = label[r];
+  }
+  // A counting sort by group, which keeps list order within each.
+  for (let g = 0; g <= groups; g++) starts[g] = 0;
+  for (let i = 0; i < n; i++) starts[of[i] + 1]++;
+  for (let g = 0; g < groups; g++) starts[g + 1] += starts[g];
+  for (let g = 0; g < groups; g++) label[g] = starts[g];
+  for (let i = 0; i < n; i++) grouped[label[of[i]]++] = list[i];
+  for (let i = 0; i < n; i++) {
+    const j = list[i];
+    node[J.a[j]] = 0;
+    if (J.b[j] >= 0) node[J.b[j]] = 0;
+  }
+  J.groups = groups;
+  J.drives = drives;
+}
+
+function root(union, k) {
+  while (union[k] !== k) {
+    union[k] = union[union[k]];
+    k = union[k];
+  }
+  return k;
+}
+
+// The joints' jobs (core/jobs.js), after the contacts' (contact.js, JOBS):
+// the warm start and the pass of rows solved one joint at a time, by groups
+// of joints (groupJoints()), and the trees' (holdTrees()), by trees. A pass is
+// two dispatches, the groups' and then the trees', so every body takes its
+// one-at-a-time rows' pushes before its tree's, as on one thread. Every
+// thread runs these same functions, on its own copy of this module's
+// scratch; what they read besides the columns comes in `args`, from ARG on,
+// past the contacts' (core/jobs.js).
+const WARM_GROUPS = CONTACT_WORK.jobs.length, SOLVE_GROUPS = WARM_GROUPS + 1, TREES = WARM_GROUPS + 2;
+const ARG = 10, H = ARG, BIAS = ARG + 1, AGAIN = ARG + 2, STORE = ARG + 3, POSE = ARG + 4, SOFT = ARG + 5, TREE_JOINTS = ARG + 8;
+/** The args with no workers to read them. */
+const ARGS = new Float64Array(ARG + 10);
+
+function warmJob(world, c, args, from, to) {
+  const J = world._joints, starts = J.starts;
+  warmJoints(world, J, starts[from], starts[to]);
+}
+
+function solveJob(world, c, args, from, to) {
+  const J = world._joints, starts = J.starts;
+  const h = args[H], bias = args[BIAS] === 1, keep = args[STORE] === 1;
+  J.pose = args[POSE];
+  jointSoft.biasRate = args[SOFT]; jointSoft.massScale = args[SOFT + 1]; jointSoft.impulseScale = args[SOFT + 2];
+  solveRange(world, J, starts[from], starts[to], h, bias, keep);
+}
+
+function treeJob(world, c, args, from, to) {
+  const F = world._joints.forest, h = args[H], bias = args[BIAS] === 1, again = args[AGAIN] === 1;
+  F.count = args[TREE_JOINTS];
+  holdTrees(world, from, to, h, bias, again);
+}
+
+/** Every job by kind, the contacts' and the joints', as a worker (worker.js) and core/jobs.js know them. */
+export const JOBS = [...CONTACT_WORK.jobs, warmJob, solveJob, treeJob];
+
+/**
+ * What a world's Jobs needs: the contacts' (contact.js, WORK) and the
+ * joints', with the world's columns the joints read, and the joints' and
+ * the forest's arrays. The fewest groups (or trees) worth the workers is 2,
+ * measured on whole steps of N standing ragdolls on a floor with 'auto' (7)
+ * workers on the i7-1260P, the joints' jobs dispatched against run on the
+ * stepping thread, alternating blocks (milestone 19): at 1, 83%
+ * slower; at 2, 20 to 28% faster (three runs); 3, 44%; 4, 53%; 16, 73%.
+ */
+export const WORK = {
+  jobs: JOBS,
+  least: [...CONTACT_WORK.least, 2, 2, 2],
+  columns: [...CONTACT_WORK.columns, '_invIt', '_inertia', '_lock'],
+  pairs: CONTACT_WORK.pairs,
+  joints: ['type', 'a', 'b', 'localA', 'localB', 'frameA', 'frameB', 'min', 'max', 'given', 'length', 'cone',
+    'motorSpeed', 'motorForce', 'friction', 'frequency', 'dampingRatio', 'target', 'impulse', 'kept', 'work',
+    'starts', 'grouped'],
+  forest: ['joint', 'rows', 'row', 'rhs', 'scale', 'side', 'jointInverse', 'jac', 'up', 'down', 'fresh', 'inTree',
+    'body', 'inverse', 'first', 'next', 'since', 'order', 'parent', 'vector', 'start'],
+};
+
+/** Whether this step's joints are worth the workers (see Jobs.begin). */
+export function jointsCrowded(world, least) {
+  return world._joints.groups >= least[SOLVE_GROUPS];
+}
+
+/** The args a dispatch reads: the workers' when they are live, else this thread's own. */
+function argsOf(world) {
+  const jobs = world._jobs;
+  return jobs !== null && jobs.live ? jobs.args : ARGS;
+}
+
+/** Runs job `kind` over items 0..n-1: on every thread if the workers are live, else here. */
+function run(world, kind, n, args) {
+  const jobs = world._jobs;
+  if (jobs === null || !jobs.live) JOBS[kind](world, null, args, 0, n);
+  else jobs.run(kind, world, null, 0, n);
+}
+
 // ---- rows ----
 //
 // A row at ROWS[o..o+8] is n, the linear direction it pushes b along (and a
 // against), then cA and cB, the angular parts on a and b: an impulse λ along
 // it changes vA by -λ n / ma, ωA by -λ Ia⁻¹ cA, vB by λ n / mb, ωB by λ Ib⁻¹ cB.
 
+/**
+ * Row o cleared, one number at a time: fill() is a call into the engine,
+ * which costs more than the nine stores, and this runs for most rows of
+ * every pass (12% of a step of 100 standing ragdolls, with load()'s and
+ * forest.js's own: ROADMAP.md, milestone 19).
+ */
+function clear(o) {
+  ROWS[o] = 0; ROWS[o + 1] = 0; ROWS[o + 2] = 0; ROWS[o + 3] = 0; ROWS[o + 4] = 0;
+  ROWS[o + 5] = 0; ROWS[o + 6] = 0; ROWS[o + 7] = 0; ROWS[o + 8] = 0;
+}
+
 /** Row o: the anchors' relative motion along world axis k (a ball joint's rows). */
 function point(o, k) {
-  ROWS.fill(0, o, o + 9);
+  clear(o);
   ROWS[o + k] = 1;
   cross(RA, k, ROWS, o + 3);
   cross(RB, k, ROWS, o + 6);
@@ -1174,7 +1501,7 @@ function point(o, k) {
 
 /** Row o: like point(), with a's lever reaching to b's anchor, for a slider, whose line a carries. */
 function lever(o, k) {
-  ROWS.fill(0, o, o + 9);
+  clear(o);
   ROWS[o + k] = 1;
   cross(LEVER, k, ROWS, o + 3);
   cross(RB, k, ROWS, o + 6);
@@ -1391,7 +1718,7 @@ function holdAngles(acc, o, bias) {
     C[k] *= 2;
     ACC[k] = acc[o + ANG + k];
     const r = 9 * k;
-    ROWS.fill(0, r, r + 9);
+    clear(r);
     ROWS[r + 3 + k] = 1;
     ROWS[r + 6 + k] = 1;
   }
@@ -1427,9 +1754,9 @@ function holdLine(acc, o, bias) {
   for (let k = 0; k < 3; k++) acc[o + LIN + k] += LAMBDA[0] * P1[k] + LAMBDA[1] * P2[k];
 }
 
-/** A motor on row o: drives its speed to `target`, pushing no harder than `most` (its force times the substep). */
-function motor(o, target, most, acc, k) {
-  const l = -free(o) * (speed(o) - target), old = acc[k];
+/** A motor on row o, of effective mass e (free()): drives its speed to `target`, pushing no harder than `most` (its force times the substep). */
+function motor(o, e, target, most, acc, k) {
+  const l = -e * (speed(o) - target), old = acc[k];
   let next = old + l;
   if (next > most) next = most; else if (next < -most) next = -most;
   acc[k] = next;
@@ -1443,10 +1770,12 @@ function motor(o, target, most, acc, k) {
  * up to its own force, so friction adds nothing to one. A motor given a
  * target drives toward it (drive()), the target moving at motorSpeed.
  */
-function driven(world, j, h, acc, o, bias) {
+function driven(world, j, h, acc, o, bias, kept) {
   const J = world._joints, force = J.motorForce[j];
+  // A hinge keeping its work (hinged()) has row 0's effective mass, and its
+  // angle, worked out already.
+  const e = kept ? HINGED[0] : free(0);
   if (force > 0 && (J.given[j] & TARGET) !== 0) {
-    world._drives++;
     const t = 4 * j, rate = J.motorSpeed[j], hinge = J.type[j] === HINGE;
     // The target moves at motorSpeed, carried on a substep as the relax pass
     // begins: that pass measures the joint where the substep's move left it,
@@ -1455,11 +1784,11 @@ function driven(world, j, h, acc, o, bias) {
     // a target the bodies kept up with would be a substep's travel behind them
     // at every pass after the first, and the spring would hold them there.
     if (!bias && rate !== 0) J.target[t] = hinge ? round(J.target[t] + rate * h) : J.target[t] + rate * h;
-    const error = hinge ? round(twist() - J.target[t]) : -(D[0] * A1[0] + D[1] * A1[1] + D[2] * A1[2]) - J.target[t];
+    const error = hinge ? round((kept ? HINGED[1] : twist()) - J.target[t]) : -(D[0] * A1[0] + D[1] * A1[1] + D[2] * A1[2]) - J.target[t];
     soften(J, j, h, bias);
-    drive(0, error, rate, force * h, acc, o + MOTOR);
-  } else if (force > 0) motor(0, J.motorSpeed[j], force * h, acc, o + MOTOR);
-  else motor(0, 0, J.friction[j] * h, acc, o + MOTOR);
+    drive(0, e, error, rate, force * h, acc, o + MOTOR);
+  } else if (force > 0) motor(0, e, J.motorSpeed[j], force * h, acc, o + MOTOR);
+  else motor(0, e, 0, J.friction[j] * h, acc, o + MOTOR);
 }
 
 /**
@@ -1499,15 +1828,15 @@ function soften(J, j, h, bias) {
 }
 
 /**
- * A drive on row o, softened by `spring` (soften()): asks the row's speed to
+ * A drive on row o, of effective mass e (free()), softened by `spring` (soften()): asks the row's speed to
  * be the target's own, `rate`, less biasRate times `error`, how far past its
  * target the joint is along the row, and pushes no harder than `most`, the
  * motor's force times the substep, either way. Box2D's soft step with its
  * motor's clamp, pinned to the joint's rows that must hold as a motor is.
  */
-function drive(o, error, rate, most, acc, k) {
+function drive(o, e, error, rate, most, acc, k) {
   const old = acc[k];
-  const l = -free(o) * spring.massScale * (speed(o) - rate + spring.biasRate * error) - spring.impulseScale * old;
+  const l = -e * spring.massScale * (speed(o) - rate + spring.biasRate * error) - spring.impulseScale * old;
   let next = old + l;
   if (next > most) next = most; else if (next < -most) next = -most;
   acc[k] = next;
@@ -1524,13 +1853,14 @@ function drive(o, error, rate, most, acc, k) {
  * The impulse is kept in ANG as a world vector, as a fixed joint keeps its
  * turning rows', so the warm start applies it with angles().
  */
-function ballFriction(most, acc, o) {
+function ballFriction(most, acc, o, inverted) {
   // λ = -K⁻¹ v: what stops the turning this pass. Where K can't be inverted
   // (a body locked about some axes, held to one that can't turn), each row
   // is solved alone instead, a row that nothing can turn along taking none.
   // ponytail: rows alone are only Jacobi; solve the free 2x2 if partly
   // locked ball joints with friction ever need it exact.
-  if (spinMass()) {
+  for (let f = 0; f < 3; f++) RHS[f] = speed(SPIN[f]);
+  if (inverted) {
     for (let f = 0; f < 3; f++) SPUN[f] = -(K3[3 * f] * RHS[0] + K3[3 * f + 1] * RHS[1] + K3[3 * f + 2] * RHS[2]);
   } else {
     for (let f = 0; f < 3; f++) SPUN[f] = K3[4 * f] > 0 ? -RHS[f] / K3[4 * f] : 0;
@@ -1540,18 +1870,17 @@ function ballFriction(most, acc, o) {
 
 /**
  * A ball or rotation joint's drive: ballFriction()'s three rows of a turning
- * against b, asked to bring a to its target turn (turnError()), softened by
+ * against b (`inverted` and the error from turned()), asked to bring a to its
+ * target turn (turnError()), softened by
  * the drive's spring (soften()), and clamped as one vector to a ball of
  * radius `most`, the motor's force times the substep: the same pull whichever
  * way the joint is off, however the scene is turned. The impulse is kept in
  * ANG, as friction's is, which is off while a motor is on.
  */
-function turnDrive(world, J, j, most, h, bias, acc, o) {
-  world._drives++;
-  turnError(world, J, j);
+function turnDrive(world, J, j, most, h, bias, acc, o, inverted) {
   soften(J, j, h, bias);
   const i = o + ANG, scale = spring.massScale, rate = spring.biasRate, keep = spring.impulseScale;
-  const inverted = spinMass();
+  for (let f = 0; f < 3; f++) RHS[f] = speed(SPIN[f]);
   for (let f = 0; f < 3; f++) RHS[f] += rate * ERR[f];
   if (inverted) {
     for (let f = 0; f < 3; f++) SPUN[f] = -scale * (K3[3 * f] * RHS[0] + K3[3 * f + 1] * RHS[1] + K3[3 * f + 2] * RHS[2]) - keep * acc[i + f];
@@ -1599,17 +1928,12 @@ const ERR = new Float64Array(3), AIM = new Float64Array(4), TURN = new Float64Ar
 /**
  * The three turning rows of ballFriction() and turnDrive(), at SPIN, and
  * their coupling with the joint's pinned rows holding into K3, inverted if
- * this returns true, with the pinned rows' share of a push on each in SHARE,
- * and each row's speed in RHS.
+ * this returns true, with the pinned rows' share of a push on each in SHARE.
+ * Their speeds, into RHS, the callers work out after.
  */
-function spinMass() {
+function spinPose() {
   if (pins < 0) pin(pinType);
-  for (let f = 0; f < 3; f++) {
-    const r = SPIN[f];
-    ROWS.fill(0, r, r + 9);
-    ROWS[r + 3 + f] = 1;
-    ROWS[r + 6 + f] = 1;
-  }
+  spinRows();
   // Their coupling with the point held, K - Kfp Kpp⁻¹ Kpf, as free() works
   // out one row's: the pinned rows' share of a push on each into SHARE.
   for (let f = 0; f < 3; f++) {
@@ -1627,9 +1951,18 @@ function spinMass() {
       K3[3 * f + g] = k;
       K3[3 * g + f] = k;
     }
-    RHS[f] = speed(SPIN[f]);
   }
   return inverseSPD(K3, 3, K3);
+}
+
+/** The turning rows at SPIN: a's turning against b about each world axis. */
+function spinRows() {
+  for (let f = 0; f < 3; f++) {
+    const r = SPIN[f];
+    clear(r);
+    ROWS[r + 3 + f] = 1;
+    ROWS[r + 6 + f] = 1;
+  }
 }
 
 /** SPUN added to the turning rows' impulse at ANG, the sum clamped to a ball of radius `most`, and applied with the pinned rows' reaction. */
@@ -1717,7 +2050,7 @@ function pin(type) {
   } else if (type === SLIDER) {
     for (let k = 0; k < 3; k++) {
       const r = 9 + 9 * k;
-      ROWS.fill(0, r, r + 9);
+      clear(r);
       ROWS[r + 3 + k] = 1;
       ROWS[r + 6 + k] = 1;
       KIND[k] = ANGLE + k;
@@ -1864,7 +2197,7 @@ function flatten(acc, i) {
 function angles(acc, i) {
   for (let k = 0; k < 3; k++) {
     const r = 9 * k;
-    ROWS.fill(0, r, r + 9);
+    clear(r);
     ROWS[r + 3 + k] = 1;
     ROWS[r + 6 + k] = 1;
     apply(r, acc[i + k]);

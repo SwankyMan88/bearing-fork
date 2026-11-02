@@ -30,12 +30,12 @@ import { volume, inertia as shapeInertia, hullMass, shifted, turnedTensor, matri
 import { build } from './hull.js';
 import {
   Contacts, PIXEL, narrow, store, inertias, turnedInertias, prepare, makeSoft, warmStart, solve, restitution, touched, gapOf,
-  WORK, crowded, rest,
+  crowded, rest,
 } from './contact.js';
 import { Jobs, cores, sharedMemory } from './core/jobs.js';
 import {
   Joints, Joint, addJoint, setJoint, jointOf, jointSlot, dropJoint, dropJointsOf, gather, warmStartJoints, solveJoints,
-  jointSoft, JOINT_STIFFNESS, JOINT_DAMPING_RATIO, plantJoints,
+  jointSoft, JOINT_STIFFNESS, JOINT_DAMPING_RATIO, plantJoints, groupJoints, jointsCrowded, WORK,
 } from './joints.js';
 import { Broadphase } from './broadphase.js';
 import { anchored } from './forest.js';
@@ -957,7 +957,10 @@ export class World {
       colour(this, next);
       if (next.solved < touching) rest(next);
     }
-    if (held > 0) plantJoints(this);
+    if (held > 0) {
+      plantJoints(this);
+      groupJoints(this);
+    }
 
     const substeps = this._substeps, h = dt / substeps;
     if (touching > 0 || held > 0) inertias(this);
@@ -979,7 +982,8 @@ export class World {
     // the bodies (_accelerate, _move) stays on this thread: measured, 1.1% of
     // the landing pile's step and 0.6% of the pyramid's, so sharing it could
     // save no more than that, for two more dispatches a substep.
-    const jobs = this._jobs, parallel = jobs !== null && jobs.begin(this, next, touching > 0 && crowded(next, jobs.least));
+    const jobs = this._jobs, parallel = jobs !== null
+      && jobs.begin(this, next, (touching > 0 && crowded(next, jobs.least)) || (held > 0 && jointsCrowded(this, jobs.least)));
     try {
       if (touching > 0) {
         this._solverSteps++;
@@ -1002,12 +1006,16 @@ export class World {
       // slept, their joints opening up to 13 cm (s17 in the settling audit).
       // This way none rattle, the joints hold within half a millimetre, and a
       // limb pressed into the floor by what lies on it sinks no deeper.
-      // The joints run on this thread alone, so the workers are told (lull),
-      // each time just after the contact work that went before: left spinning
-      // through a long joint pass, they slowed it (core/jobs.js). The relax
-      // pass's stretch runs on into the next substep's warm start.
-      const lull = parallel && held > 0;
-      if (held > 0) turnedInertias(this);
+      // The joints go to the workers too, by groups and trees (joints.js,
+      // groupJoints()), when there are enough of them. When there aren't, they
+      // run on this thread alone, so the workers are told (lull), each time
+      // just after the contact work that went before: left spinning through a
+      // long joint pass, they slowed it (core/jobs.js). The relax pass's
+      // stretch runs on into the next substep's warm start.
+      const lull = parallel && held > 0 && !jointsCrowded(this, jobs.least);
+      // The bodies' pose is numbered as the step begins and after each move,
+      // for the joints' kept work (joints.js, KEPT WORK).
+      if (held > 0) { turnedInertias(this); joints.pose++; }
       for (let sub = 0; sub < substeps; sub++) {
         this._accelerate(h);
         if (touching > 0) warmStart(this, next);
@@ -1017,10 +1025,11 @@ export class World {
         if (lull) jobs.lull(1);
         if (held > 0) solveJoints(this, h, true, sub > 0);
         this._move(h);
-        if (held > 0) turnedInertias(this);
+        if (held > 0) { turnedInertias(this); joints.pose++; }
         if (touching > 0) solve(this, next, h, false);
         if (lull) jobs.lull(2);
-        if (held > 0) solveJoints(this, h, false);
+        // Kept for the next substep's solve pass: the last has none.
+        if (held > 0) solveJoints(this, h, false, false, sub < substeps - 1);
       }
     } finally {
       if (parallel) jobs.end();
