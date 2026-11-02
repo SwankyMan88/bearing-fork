@@ -2,7 +2,8 @@
 
 Every public call, option and setting, with what it does, what it takes, what it returns and what
 it throws. Look a call up in the [index](#index) below, or search this page for its name. The
-[README](../README.md) says what Bearing is; this page is how to use it.
+[README](../README.md) says what Bearing is; this page is how to use it, and
+[Engines](ENGINES.md) how to draw it with Three.js, Babylon.js, PlayCanvas, Pixi or Winding.
 
 ```js
 import { World } from 'bearing-physics';
@@ -191,16 +192,19 @@ world.workers = 0;   // one thread: nothing started, nothing shared
 ```
 
 Notes: results are the same to the bit with any number of workers or none (see
-[Determinism](#determinism)). The workers share three things with the stepping thread, which
+[Determinism](#determinism)). The workers share four things with the stepping thread, which
 takes its share too: finding the contacts between boxes, balls and capsules; preparing every
-contact; and solving them, in groups that share no body that moves, one group after another as on
-one thread, where only the order within a group, which changes no result, differs. Hulls, meshes,
-heightfields and compounds are found, and joints, sleep and the rest run, on the stepping thread.
+contact; solving the contacts, in groups that share no body that moves, one group after another as
+on one thread, where only the order within a group, which changes no result, differs; and solving
+the joints, in groups of joints that share no body that moves and in whole trees of joints (a
+ragdoll, a chain), each body taking its pushes in the same order as on one thread. Hulls, meshes,
+heightfields and compounds are found, and sleep and the rest run, on the stepping thread.
 
 - **They start by themselves**, the first step with enough work for them (a group of four
-  contacts, or 128 pairs of bodies near enough to touch), and steps run on one thread until they
-  are running, a few tens of milliseconds later. A world that never has that much never starts
-  any. There is nothing to wait for and nothing to call.
+  contacts, 128 pairs of bodies near enough to touch, or two groups of joints that share no moving
+  body, such as two ragdolls), and steps
+  run on one thread until they are running, a few tens of milliseconds later. A world that never
+  has that much never starts any. There is nothing to wait for and nothing to call.
 - **`'auto'` is half the machine's threads, less one**, and at least one where there are two
   (`navigator.hardwareConcurrency` in a browser, `os.availableParallelism()` in Node): one worker
   a core where each core runs two threads, since the second shares the core's arithmetic. On an
@@ -210,12 +214,17 @@ heightfields and compounds are found, and joints, sleep and the rest run, on the
   number to trade speed for power.
 - **Shared memory is needed.** In a browser that means a cross-origin isolated page, one served
   with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`
-  (`crossOriginIsolated` is then `true`). Without it, or in Node before 20.16, the world runs on
-  one thread, with the same results.
+  (`crossOriginIsolated` is then `true`); in Electron, the app sets those headers on its pages.
+  Without it, or in Node before 20.16 (or 22.0 to 22.2), the world runs on one thread, with the
+  same results. Loaded from another origin, such as a CDN, Bearing starts its workers through a
+  one-line module of the page's own, since a browser won't start a worker from another origin.
 - **Between steps they sleep**, using nothing. While a step runs they wait for the next group by
-  spinning, so a step uses up to that many more cores while it lasts; but not through its joints,
-  which run on one thread: through a joint pass that last took over 50 µs they sleep, and the
-  next group wakes them.
+  spinning, so a step uses up to that many more cores while it lasts; but not through joints too
+  few to share (one group), which run on the stepping thread: through such a
+  joint pass that last took over 50 µs they sleep, and the next group wakes them.
+- **What they gain** depends on the work: 7 workers stepped 100 ragdolls standing on their motors
+  in about 6 ms, against 18 to 21 ms on one thread (i7-1260P). A small world gains nothing: a
+  stack of 10 boxes stepped in 0.0204 ms with workers and 0.0154 ms without, in Chrome.
 - **[`destroy()`](#world-destroy) ends them**, and so does the world being garbage collected. They
   never keep a Node process from exiting.
 - **They aren't saved.** A world from [`World.load`](#world-load) has `'auto'`, as a new one does.
@@ -279,7 +288,9 @@ Notes: the array is replaced when the world's storage grows or shrinks, which ha
 those, or simply every frame; do not keep it. Slots of removed bodies, and slots no body has used,
 hold leftover numbers: read only the slots of bodies you have. It is a `Float32Array` because that
 is what renderers upload. The simulation itself runs in doubles, so these numbers are rounded
-copies, and reading them never changes the simulation.
+copies, and reading them never changes the simulation. [Engines](ENGINES.md) shows the copy, with
+[`previous`](#world-previous) and [`moved`](#world-moved), for Three.js, Babylon.js, PlayCanvas,
+Pixi and Winding.
 
 <a id="world-previous"></a>
 ### `world.previous` → `Float32Array`
@@ -1436,7 +1447,7 @@ const hills = world.addBody({ shape: 'heightfield', heights: [0, 1, 0, 1, 3, 1, 
 - **Static, or kinematic, never dynamic.** Triangles enclose nothing, so they have no mass to fall
   with or turn. A mesh or heightfield is static unless given `type: 'kinematic'`, which makes a
   moving platform of any shape; `'dynamic'` throws. Its `mass` is 0. A falling object of any
-  shape will come with compound shapes, in a later version.
+  shape is a hull, or a compound of hulls: see [Hulls and compounds](#hulls).
 - **A mesh's triangles have two sides.** A body is pushed out on whichever side it is, so a wall
   needs no thickness, and the order of a triangle's corners doesn't matter.
 - **A heightfield has one side: it is ground.** Everything under its surface is in the ground, and
@@ -1836,8 +1847,8 @@ zone; a kinematic one follows something, as a trigger around a character does.
   bullet's ray shouldn't stop at an invisible trigger zone. What is in a zone is for events and
   [`touching()`](#world-touching).
 - **They look where a step leaves bodies.** A sensor's pairs are checked once a step is over, so a
-  body that passes all the way through a sensor within one step isn't seen; continuous collision,
-  in a later version, will. A mesh or heightfield sensor sees what touches its triangles, not what
+  body that passes all the way through a sensor within one step isn't seen: continuous collision
+  stops bodies at what they collide with, and a sensor collides with nothing. A mesh or heightfield sensor sees what touches its triangles, not what
   is inside it, since triangles are a surface; two meshes never meet.
 
 <a id="layers"></a>

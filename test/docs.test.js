@@ -1,5 +1,7 @@
-// The API reference is complete, every link in it goes somewhere, and every
-// example in it runs.
+// The API reference is complete, every link in it and the README and docs goes
+// somewhere, and every example in the reference, the README and the
+// side-by-side's Bearing program runs (docs/ENGINES.md's are run by
+// test/engines.test.js).
 // Run: node test/docs.test.js
 //
 // Written by hand, docs/API.md drifts the moment a method is added without an
@@ -9,7 +11,7 @@
 // is run against the real package.
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { World, Body, Joint, readGlb } from '../src/bearing.js';
 import * as bearing from '../src/bearing.js';
 import { suite, test } from './test.js';
@@ -18,6 +20,10 @@ suite('docs');
 
 const API = readFileSync(new URL('../docs/API.md', import.meta.url), 'utf8');
 const README = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+// docs/ENGINES.md's examples are run by test/engines.test.js, against stand-ins for each engine;
+// here only its links are checked.
+const SIDE = readFileSync(new URL('../docs/SIDE-BY-SIDE.md', import.meta.url), 'utf8');
+const ENGINES = readFileSync(new URL('../docs/ENGINES.md', import.meta.url), 'utf8');
 const anchors = new Set([...API.matchAll(/<a id="([^"]+)"><\/a>/g)].map((m) => m[1]));
 
 /** Every public method and getter a class's instances have, as `prefix-name` anchors. Underscored names are internal. */
@@ -54,8 +60,44 @@ test('every entry is for something that exists', () => {
 test('every link to an entry lands on one', () => {
   const inPage = [...API.matchAll(/\]\(#([^)]+)\)/g)].map((m) => m[1]);
   const fromReadme = [...README.matchAll(/\]\(docs\/API\.md#([^)]+)\)/g)].map((m) => m[1]);
-  const broken = [...new Set([...inPage, ...fromReadme])].filter((id) => !anchors.has(id));
+  const fromDocs = [...`${SIDE}${ENGINES}`.matchAll(/\]\(API\.md#([^)]+)\)/g)].map((m) => m[1]);
+  const broken = [...new Set([...inPage, ...fromReadme, ...fromDocs])].filter((id) => !anchors.has(id));
   assert.deepEqual(broken, [], `links to nothing: ${broken.join(', ')}`);
+});
+
+test('every link from the README and the docs to a file finds it, and every link to a README heading lands on one', () => {
+  const local = /\]\(((?!https?:|#)[^)#]+)(?:#[^)]*)?\)/g;
+  const files = [
+    ...[...README.matchAll(local)].map((m) => new URL(`../${m[1]}`, import.meta.url)),
+    ...[...`${API}${SIDE}${ENGINES}`.matchAll(local)].map((m) => new URL(`../docs/${m[1]}`, import.meta.url)),
+  ];
+  const missing = files.filter((url) => !existsSync(url)).map((url) => url.pathname);
+  assert.deepEqual(missing, [], `links to nothing: ${missing.join(', ')}`);
+  // GitHub's heading ids: lower case, punctuation dropped, spaces to hyphens.
+  const headings = new Set([...README.matchAll(/^#+ (.+)$/gm)].map((m) => m[1].toLowerCase().replace(/[^\w\- ]/g, '').replace(/ /g, '-')));
+  const toReadme = [...README.matchAll(/\]\(#([^)]+)\)/g), ...`${SIDE}${ENGINES}`.matchAll(/\]\(\.\.\/README\.md#([^)]+)\)/g)].map((m) => m[1]);
+  const lost = toReadme.filter((id) => !headings.has(id));
+  assert.deepEqual(lost, [], `README headings that aren't there: ${lost.join(', ')}`);
+});
+
+test("the side-by-side's Bearing program runs as printed, and its box ends at rest on the floor", () => {
+  const programs = examples(SIDE);
+  // One for each engine; only Bearing's can run here, since the others need their engines
+  // (they are run, as printed, in a browser page that loads each one).
+  assert.deepEqual(programs.map((code) => code.match(/from '([^']+)'/)[1]),
+    ['bearing-physics', '@dimforge/rapier3d-simd-compat', 'cannon-es', 'jolt-physics']);
+  // The line count table counts what is printed.
+  const counted = SIDE.match(/^\| Lines, blank lines excluded \|(.+)\|$/m)[1].split('|').map(Number);
+  assert.deepEqual(counted, programs.map((code) => code.split('\n').filter((line) => line.trim()).length));
+  const printed = [];
+  const body = programs[0].split('\n').filter((line) => !line.startsWith('import ')).join('\n');
+  new Function('World', 'console', body)(World, { log: (...args) => printed.push(args) });
+  assert.equal(printed.length, 1);
+  const [[[x, y, z]]] = printed;
+  // On its face, its centre half a metre up, within a contact's tolerance (5 mm for a 1 m box).
+  assert.ok(Math.abs(y - 0.5) < 0.005, `the box ended at y = ${y}`);
+  // Knocked along +x by the ball, and no other way.
+  assert.ok(x > 0 && Math.abs(z) < 1e-9, `the box ended at [${x}, ${y}, ${z}]`);
 });
 
 test('the index lists every entry and section', () => {

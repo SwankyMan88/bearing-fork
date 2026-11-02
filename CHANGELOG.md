@@ -336,3 +336,15 @@ All notable changes to Bearing are recorded here. The format follows
   without before that, and now 1.15 times.
 - The `centerOfMass` option, `[x, y, z]` in the body's own frame or `null` for the shape's, moves
   any body's centre of mass, as a car's is lowered so it doesn't roll over.
+- Documentation. The README says what Bearing is and isn't, with the measured comparison against
+  Rapier, Jolt and cannon-es, its method and machine, where Bearing is ahead and where it is
+  behind, how to load it before it is on npm, what its determinism promises and how that is
+  tested, and its limitations. `docs/SIDE-BY-SIDE.md` has the same small program in Bearing,
+  Rapier, cannon-es and Jolt, and what each asks for that Bearing works out. `docs/ENGINES.md`
+  shows how Three.js, Babylon.js, PlayCanvas, Pixi and Winding copy `world.transforms` onto their
+  objects, between steps and only for what moved. Every example in them runs in a test
+  (`test/engines.test.js` runs the engine examples against stand-ins for each engine).
+- Fixed in the API reference: `world.workers` now says the workers solve joints too, and when;
+  a falling object of any shape is a hull or compound (it said compounds were still to come); and
+  continuous collision doesn't make a sensor see a body that passes through it within a step (it
+  said a later version would).

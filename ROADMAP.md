@@ -715,13 +715,21 @@ every body takes its pushes in the one-thread order; from 2 groups up (1 group 8
 pyramid even. Next levers, same bits: `solveForest` written out for blocks of 3 and 5 rows (about
 15% of a step), the kept rows reused in the warm start, no grouping with no workers.
 
-**20. Documentation ⬜**
+**20. Documentation ✅** *(done 2026-11-02; README approved by Nolan: "Land it as is")*
 *Concepts:* writing reference documentation people can learn from.
 The README with the measured comparison, its method and machines; `docs/SIDE-BY-SIDE.md`, the same
 small program in Bearing, Rapier and cannon-es, each run to check it works; and engine examples in
 the docs, showing how Three.js, Babylon.js, PlayCanvas, Pixi and Winding copy `transforms` in.
 They are examples, not code in the package.
 *Done when:* every example in every doc runs in a test.
+*Result:* the README in Winding's shape (what it is, a 7-line hello world, what it does, the
+measured comparison with its method and machine, install from jsDelivr pinned to a commit until
+npm, determinism, any renderer, limitations); `docs/SIDE-BY-SIDE.md`, the same program in Bearing,
+Rapier, cannon-es and Jolt, all four run as printed in Chrome 152; `docs/ENGINES.md`, the copy loop
+for Three.js, Babylon.js, PlayCanvas, Pixi and Winding, run against stand-ins by
+`test/engines.test.js`; `test/docs.test.js` also runs the side-by-side's Bearing program and checks
+the links between the docs. `docs/API.md`'s workers entry brought up to milestone 19. Still to do
+at 1.0: the desktop's numbers, and the npm install once the name is claimed.
 
 **21. 1.0 ⬜**
 *Concepts:* release engineering; trusted publishing; checking determinism across JavaScript engines.
