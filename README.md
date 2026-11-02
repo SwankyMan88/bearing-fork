@@ -4,6 +4,7 @@
 </picture>
 
 [![CI](https://github.com/getlowarc/bearing/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/getlowarc/bearing/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/bearing-physics)](https://www.npmjs.com/package/bearing-physics)
 [![API reference](https://img.shields.io/badge/API-reference-2f6f4e)](docs/API.md)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
@@ -17,7 +18,7 @@ files you import are the files in this repository, readable and steppable in a d
 runs wherever JavaScript does: browsers, Node, Deno, Bun and workers. The same inputs give the same
 results to the bit on every machine, which replays, tests and lockstep multiplayer need. It draws
 nothing and imports nothing from any engine: Three.js, Babylon.js, PlayCanvas, Pixi and Winding
-read its results the same way. It is in development and not yet released, and it is slower than
+read its results the same way. It is at 0.14, before 1.0, so its API can still change, and it is slower than
 the WebAssembly engines; see [How it compares](#how-it-compares) and
 [Limitations](#limitations).
 
@@ -165,30 +166,38 @@ it. It also lists what each engine asked for that Bearing works out for itself.
 There is no build step and there are no dependencies, so a URL is the whole install. The files you
 import are the files in this repository.
 
-**Bearing is not on npm yet.** Until its first release, load it from this repository through
-jsDelivr's GitHub form, pinned to a commit: put a full commit hash from the repository's history
-in place of `<commit>` below. A branch name works too, but isn't pinned: what it loads changes
-as the branch does.
+**From a CDN**, which needs nothing installed at all:
+
+```html
+<script type="module">
+  import { World } from 'https://cdn.jsdelivr.net/npm/bearing-physics@0.14.0/src/bearing.js';
+</script>
+```
+
+**From npm**, if you have a bundler or an import map:
+
+```bash
+npm install bearing-physics
+```
+
+```js
+import { World } from 'bearing-physics';
+```
+
+**As an import map**, which gets you bare specifiers with no bundler and no install:
 
 ```html
 <script type="importmap">
 {
   "imports": {
-    "bearing-physics": "https://cdn.jsdelivr.net/gh/getlowarc/bearing@<commit>/src/bearing.js",
-    "bearing-physics/": "https://cdn.jsdelivr.net/gh/getlowarc/bearing@<commit>/src/"
+    "bearing-physics": "https://cdn.jsdelivr.net/npm/bearing-physics@0.14.0/src/bearing.js",
+    "bearing-physics/": "https://cdn.jsdelivr.net/npm/bearing-physics@0.14.0/src/"
   }
 }
 </script>
-<script type="module">
-  import { World } from 'bearing-physics';
-</script>
 ```
 
-Once it is released, the import map takes the npm package's URL instead, pinned to a version,
-`https://cdn.jsdelivr.net/npm/bearing-physics@x.y.z/src/bearing.js`, and a bundler takes
-`npm install bearing-physics`. Neither works yet.
-
-**Pin it.** A URL without a version or a commit can change under you, so code you have never seen
+**Pin it.** A URL without a version can change under you, so code you have never seen
 can change what your page runs, and two machines that must agree to the bit (see
 [Determinism](#determinism)) can end up running different versions.
 
@@ -238,7 +247,8 @@ PlayCanvas, Pixi and Winding.
 
 ## Limitations
 
-- **Not released yet.** Nothing is on npm, and the API can still change before 1.0.
+- **Before 1.0.** The API can still change in a minor version (0.x.0); each change is in the
+  [CHANGELOG](CHANGELOG.md).
 - **3D only.** There is no 2D module yet. Bodies locked to turn only in one plane, with
   [`lockRotation`](docs/API.md#world-addbody), stay in it to the bit, but they still cost what 3D
   bodies cost.

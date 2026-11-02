@@ -488,8 +488,8 @@ These were made with Nolan and override the rules below where they differ.
   `LmnTrtl <294360573+nolanbaxter@users.noreply.github.com>` (set in this repo's git config), and
   every `gh` call runs as the personal account (`GH_TOKEN=$(gh auth token --user NolanLT)`). The
   work account and work email never appear anywhere in this project.
-- **`package.json` is `"private": true` until the first release**, so a stray `npm publish` from
-  the repo is refused. The name claim in rule 9 is a separate placeholder package that Nolan
+- **`package.json` was `"private": true` until the first release** (0.14.0, 2026-11-02), so a
+  stray `npm publish` from the repo was refused; `release.yml` still stops on it if it returns. The name claim in rule 9 is a separate placeholder package that Nolan
   publishes himself (it needs his 2FA), and it is also what npm needs to exist before trusted
   publishing can be configured.
 
