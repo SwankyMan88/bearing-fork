@@ -72,7 +72,7 @@ met and measured.
 - A 1 cm marble and a 50 m building both behave, with nothing retuned between them.
 - A fast small body doesn't pass through a thin wall.
 - The same inputs give bit-identical results on V8 (Node) and JavaScriptCore (Bun), checked in CI
-  against a stored hash of a whole scene.
+  against a stored hash of a whole scene. Met 2026-11-02: `test/determinism.test.js`, Bun 1.2.20.
 - The leak test (soak) passes for every kind of thing that can be added and removed.
 - Off means off: every feature that isn't used costs nothing, counted by a test.
 
@@ -652,7 +652,8 @@ narrowphase from 32 plain contacts; 4 chunks a thread). Same bits with 0, 2 and 
 i7-1260P, ms a step, one thread -> auto: landing 1,000-box pile 24.1 -> 7.4, pyramid 10.7 -> 3.4,
 8,000 boxes 253 -> 73, 1,000 hulls 32.2 -> 14.8, terrain 24.4 -> 11.2; chains (joint-bound) and
 small worlds unchanged. In the browser pane, cross-origin isolated, an awake pile 11.3 -> 4.1 ms.
-Not yet run: Deno, Bun, and the Ryzen 5 5500 (Nolan's).
+Not yet run: Deno, Bun, and the Ryzen 5 5500 (Nolan's). (Bun has since run the determinism hash
+in CI, one thread, 2026-11-02; not these timings.)
 
 **17. Pose motors ✅** *(approved and done 2026-10-30)*
 *Concepts:* drives and soft constraints; a spring as a constraint with a frequency and a damping

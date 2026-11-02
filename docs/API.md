@@ -1958,7 +1958,8 @@ multiply-add and extended precision, so every engine rounds them the same way. T
 language leaves to each engine, such as `Math.sin`, `Math.cos` and `Math.atan2`, are never used
 inside Bearing; where it needs an angle, as in [`setAxisAngle`](#body-setaxisangle) or a hinge's
 angle, it uses its own sine, cosine and arctangent, built from the exact operations. A test fails
-if any of the others appears.
+if any of the others appears, and another steps a world of every feature for 10 s against a stored
+hash of its bits, run on Node (V8) and on Bun (JavaScriptCore).
 
 What it does not cover:
 

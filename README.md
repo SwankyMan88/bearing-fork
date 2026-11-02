@@ -218,12 +218,12 @@ because JavaScript defines `+`, `-`, `*`, `/` and `Math.sqrt` exactly, and Beari
 functions each JavaScript engine may round its own way, such as `Math.sin` and `Math.atan2`: where
 it needs an angle, it uses its own sine, cosine and arctangent, built from the exact operations.
 
-Three tests hold it: `test/math.test.js` fails if anything in `src/` calls one of those
-functions; `test/workers.test.js` steps a world of every feature, and standing ragdolls, with 0, 2
-and 4 workers and checks the bits match; and `test/save.test.js` saves such a world mid-run, loads
-it, and checks that 600 more steps match the original's to the bit. Not yet checked: the same
-scene's bits on a second JavaScript engine. A stored hash of a whole scene, checked on Bun as well
-as Node in CI, comes with 1.0. Different versions of Bearing may give different results, so pin
+Four tests hold it: `test/math.test.js` fails if anything in `src/` calls one of those
+functions; `test/determinism.test.js` steps a world of every feature for 10 s and checks a hash of
+every body's state against the one it stores, and CI runs it on Bun (JavaScriptCore) as well as
+Node (V8); `test/workers.test.js` steps such a world, and standing ragdolls, with 0, 2 and 4
+workers and checks the bits match; and `test/save.test.js` saves such a world mid-run, loads it,
+and checks that 600 more steps match the original's to the bit. Different versions of Bearing may give different results, so pin
 the version on every machine that has to agree. See [Determinism](docs/API.md#determinism).
 
 ## Any renderer
