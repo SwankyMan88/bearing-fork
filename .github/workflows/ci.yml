@@ -6,6 +6,8 @@
 #   Node suites   the ones whose imports reach a changed file, each run as
 #                 `npm test` runs it, on Node 20, 22 and 24. None at all for a
 #                 change no suite reads: the changelog, the roadmap, benchmarks.
+#   Bun           test/determinism.test.js on JavaScriptCore too, whenever it
+#                 runs on Node: the stored hash of a whole scene, the same bits.
 #   types         the declarations against the docs' examples, when either
 #                 changed.
 #
@@ -62,6 +64,20 @@ jobs:
         run: bash -c "$SUITES"
         env:
           SUITES: ${{ needs.plan.outputs.node }}
+
+  # The determinism hash on a second JavaScript engine, JavaScriptCore, whenever
+  # the plan runs it on Node: the same bits there too, or the promise is V8's.
+  bun:
+    needs: plan
+    if: contains(needs.plan.outputs.node, 'test/determinism.test.js')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # Bun is fetched for this step alone; the package still depends on nothing.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.20
+      - run: bun ./test/determinism.test.js
 
   types:
     needs: plan
