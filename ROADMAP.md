@@ -831,7 +831,12 @@ Winding's way, copied before the first one:
 
 ### Before the first release
 
-- `release.yml` and `release-notes.js`, adapted from Winding's.
+- ✅ *(done 2026-11-02)* `release.yml` and `release-notes.js`, adapted from Winding's. One step
+  added: the release stops before tagging while `package.json` is still `"private": true`, so a
+  merge before the first release announces nothing. Still needed at the first release: a `main`
+  branch on GitHub for the pull request to go into (there is none yet), taking pull requests only,
+  and the trusted publisher set on npmjs.com (`bearing-physics` -> Settings -> Trusted publishers
+  -> GitHub Actions, `getlowarc/bearing`, `release.yml`), which needs the name to exist first.
 - ✅ *(done 2026-11-02)* **CI runs only the tests a change reaches**, as Winding's does: `.github/affected.js` follows
   each suite's imports, and the files it reads through `new URL(…, import.meta.url)`, down to
   every file it depends on, and runs only the suites a changed file is in. The types check runs
