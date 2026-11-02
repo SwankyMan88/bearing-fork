@@ -813,7 +813,7 @@ Each milestone that adds API is a minor version. Fixes between them are patches.
 | 0.12.x | 16 | The performance pass and workers: reworks, so patches. A setting for workers would be an addition, and 0.13.0. |
 | 0.13.0 | 17 | Pose motors. |
 | 0.14.0 | 18 | Joint forces. |
-| 0.14.x | 19, 20 | Many active ragdolls fast, and the docs: reworks, so patches. |
+| 0.14.0 | 18, 19, 20 | The first release, 2026-11-02 (Nolan chose to start at the planned number): everything through joint forces, with 19 and 20 in it. |
 | 1.0.0 | 21 | Every goal met and measured. |
 
 ### How a release is made
@@ -847,8 +847,9 @@ Winding's way, copied before the first one:
   of `src/`), each suite runs with the node flags `npm test` gives it (read from `package.json`,
   and the test checks every suite in `test/` is there), and a file added or removed runs
   everything, as the docs' links name files.
-- `package.json` loses `"private": true`.
-- The `bearing-physics` name exists on npm. npm can only trust a workflow for a package that already
+- ✅ *(done 2026-11-02, in the release of 0.14.0)* `package.json` loses `"private": true`.
+- ✅ *(done 2026-11-02: Nolan published a 0.0.0 placeholder and set the trusted publisher)* The
+  `bearing-physics` name exists on npm. npm can only trust a workflow for a package that already
   exists, so the very first publish is by hand, by Nolan, since it needs his 2FA: either a 0.0.0
   placeholder or 0.1.0 itself.
 - What Winding has for a public repository: `CONTRIBUTING.md` (branches, tests, what a change
@@ -1019,3 +1020,9 @@ Winding's way, copied before the first one:
   32 ragdolls took 5.5 to 7.7 ms. Vehicles and a ragdoll builder come off the after-1.0 list: they
   are game feel and belong in the games' code (Nolan: the updates must belong in Bearing, not in
   the game's code). Joint breaking likewise: Bearing reports the force, the game removes the joint.
+- **2026-11-02.** The first release, 0.14.0, at Nolan's word ("I need you to put in the real code"),
+  numbered where the plan puts the API (Nolan chose it over 0.1.0). Before it: the CI planner
+  (`.github/affected.js`), the determinism hash on Bun, and Winding's release workflow; Nolan
+  claimed `bearing-physics` on npm with a 0.0.0 placeholder and set the trusted publisher. Made
+  Winding's way: a `Release 0.14.0` commit on `develop`, a `main` branch made for it, and a pull
+  request into `main` whose merge runs `release.yml`.

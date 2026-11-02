@@ -7,6 +7,19 @@ All notable changes to Bearing are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-02
+
+The first release. Bearing is a 3D physics engine in plain JavaScript, for any renderer, with no
+dependencies and no build step, and this brings everything built so far: dynamic, static,
+kinematic and character bodies of boxes, balls, capsules, convex hulls and compounds; triangle
+meshes and heightfields, read from `.glb` too; contacts that stack, friction, bounces and
+continuous collision; sleeping; raycasts, shape casts and overlap tests; contact events and
+sensors; fixed, ball, hinge, slider, distance and rotation joints with stops, motors, springs,
+friction, pose targets and the force each one carries; save and load; and workers. The same
+inputs give the same results to the bit on every machine and with any number of workers. It is
+numbered 0.14.0 because that is where the roadmap's plan puts the API, and before 1.0 a minor
+version may still change it.
+
 ### Added
 
 - Joints are solved on the workers too: joints that share no moving body, and whole joint trees,
@@ -348,3 +361,6 @@ All notable changes to Bearing are recorded here. The format follows
   a falling object of any shape is a hull or compound (it said compounds were still to come); and
   continuous collision doesn't make a sensor see a body that passes through it within a step (it
   said a later version would).
+
+[Unreleased]: https://github.com/getlowarc/bearing/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/getlowarc/bearing/releases/tag/v0.14.0
