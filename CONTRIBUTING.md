@@ -19,8 +19,10 @@ npm test
 ```
 
 Plain Node scripts, no framework, no install (there is nothing to install), on Node 20 or newer.
-CI runs them on Node 20, 22 and 24, and checks the TypeScript declarations against
-`test/types.ts`.
+CI runs the suites a change reaches, on Node 20, 22 and 24, and checks the TypeScript declarations
+against `test/types.ts` when they or it changed; `.github/affected.js` decides, and
+`node .github/affected.js <base> <head>` prints what it would run. A new suite goes in the `test`
+script in `package.json`, or CI never runs it (`test/affected.test.js` fails until it is there).
 
 The demo, which Winding draws, is not a test, and no test needs it:
 

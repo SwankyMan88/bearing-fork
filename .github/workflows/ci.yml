@@ -1,8 +1,20 @@
-# Every test on every push, on each Node Bearing supports.
+# What a change is checked by, and nothing else, as in Winding.
 #
-# The suite is a few seconds, so everything runs every time. Winding runs only
-# the suites a change reaches; that is worth copying once this is big enough
-# for the difference to matter (rule 95), and not before.
+# The plan job reads the commits a push brought (or a pull request from a fork)
+# and .github/affected.js decides what reaches them:
+#
+#   Node suites   the ones whose imports reach a changed file, each run as
+#                 `npm test` runs it, on Node 20, 22 and 24. None at all for a
+#                 change no suite reads: the changelog, the roadmap, benchmarks.
+#   types         the declarations against the docs' examples, when either
+#                 changed.
+#
+# Everything runs when CI or package.json changed, a file was added or removed,
+# or there is no base to compare with.
+#
+# Nothing runs twice: a branch here is checked when it is pushed, so its pull
+# request is not checked again, and main -- which takes pull requests only --
+# not at all.
 #
 # No install step: there are no dependencies -- nothing to cache, nothing to
 # audit, nothing to go stale between a green run and a red one.
@@ -14,7 +26,28 @@ on:
   pull_request:
 
 jobs:
+  plan:
+    # A pull request from a branch here was checked when it was pushed.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    outputs:
+      node: ${{ steps.plan.outputs.node }}
+      types: ${{ steps.plan.outputs.types }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0        # the base to compare with
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - id: plan
+        run: node .github/affected.js "$BASE" "$GITHUB_SHA"
+        env:
+          BASE: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
+
   test:
+    needs: plan
+    if: needs.plan.outputs.node != ''
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -25,9 +58,14 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
-      - run: npm test
+      - name: The Node suites the change reaches
+        run: bash -c "$SUITES"
+        env:
+          SUITES: ${{ needs.plan.outputs.node }}
 
   types:
+    needs: plan
+    if: needs.plan.outputs.types == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
