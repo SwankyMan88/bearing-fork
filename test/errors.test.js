@@ -185,8 +185,8 @@ const cases = [
 
   ['world-save', () => gone().world.save(), 'save: this world was destroyed'],
   ['world-load', () => World.load(5), 'load: data must be what world.save() returned, got 5'],
-  ['world-load', () => World.load({ ...new World().save(), format: 7 }), 'load: data is format 7; this Bearing reads format 8'],
-  ['world-load', () => World.load({ format: 8, objects: [{ c: 'Box', f: {} }] }), "load: data is damaged: an object of an unknown kind, 'Box'"],
+  ['world-load', () => World.load({ ...new World().save(), format: 8 }), 'load: data is format 8; this Bearing reads format 9'],
+  ['world-load', () => World.load({ format: 9, objects: [{ c: 'Box', f: {} }] }), "load: data is damaged: an object of an unknown kind, 'Box'"],
   ['world-debuglines', () => gone().world.debugLines(), 'debugLines: this world was destroyed'],
   ['world-debuglines', () => fresh().world.debugLines(true), 'debugLines: options must be an object, got true'],
   ['world-debuglines', () => fresh().world.debugLines({ shape: true }), "debugLines: unknown option 'shape' (did you mean 'shapes'?)"],
@@ -264,6 +264,11 @@ const cases = [
   ['world-jointof', () => new World().jointOf(joined().joint), 'jointOf: that joint belongs to another world'],
   ['world-jointof', () => { const { world, joint } = joined(); joint.destroy(); world.jointOf(joint); }, 'jointOf: this joint was removed'],
   ...['id', 'world', 'alive'].map((p) => [`joint-${p}`, () => { joined().joint[p] = 1; }, `joint.${p} is read only`]),
+  ...['force', 'torque'].flatMap((p) => [
+    [`joint-${p}`, () => { const { world, joint } = joined(); world.destroy(); return joint[p]; }, `${p}: this world was destroyed`],
+    [`joint-${p}`, () => { const { joint } = joined(); joint.destroy(); return joint[p]; }, `${p}: this joint was removed`],
+    [`joint-${p}`, () => { joined().joint[p] = [0, 0, 0]; }, `joint.${p} is read only`],
+  ]),
   ['joint-destroy', () => { const { world, joint } = joined(); world.destroy(); joint.destroy(); }, 'destroy: this world was destroyed'],
 
   ['world-contacts', () => gone().world.contacts(), 'contacts: this world was destroyed'],

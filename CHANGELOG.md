@@ -231,6 +231,12 @@ All notable changes to Bearing are recorded here. The format follows
   motor drives that turn, its `cone` a hard stop: a ragdoll's pelvis kept upright this way stands
   through a 60 N·s shove that topples it without. Joints with no target keep their bits. Saved
   worlds are now format 8.
+- Joint forces: `joint.force` and `joint.torque`, read after a step: the mean force (N) and
+  torque (N·m, about its anchor on `a`) the joint pushed `a` with over the step, everything it did
+  counted, as games need to break joints. Every impulse is counted along the row it was solved
+  with, in every pass, so a jerk shows in full: a 1 kg ball dropped 0.9 m onto a rope reads 255 N
+  in the step it goes taut, and 9.81 N hanging. A sleeping joint keeps its last. The same with any
+  number of workers. Saved worlds are now format 9.
 - Joint friction: `friction` on ball joints, hinges and sliders, the most torque (N·m) or force
   (N) the joint resists turning or sliding with, as a stiff hinge does. A hinge's or slider's is
   its motor held at speed 0, to the bit; a ball joint's resists turning every way alike. 32 ragdolls

@@ -1026,6 +1026,153 @@ test('a driven ragdoll saved mid-drive steps on to the same bits; jointOf and se
   assert.equal(world.jointOf(wave).target, null);
 });
 
+// ---- joint forces (milestone 18) ----
+
+/** Within eps of `want`, component by component. */
+const close = (got, want, eps, what) => want.forEach((w, k) => near(got[k], w, eps, `${what} [${k}]`));
+
+test('a hanging weight reads its weight through its joint; a level arm, its moment about the hinge', () => {
+  // A 10 kg ball on a ball joint from the world: the joint pulls it up with
+  // its weight, 98.1 N, and turns it not at all (measured 98.10000000000001,
+  // torque exactly 0). Before the first step, nothing.
+  const world = new World({ sleeping: false });
+  const ball = world.addBody({ shape: 'sphere', radius: 0.1, mass: 10, position: [0, 4, 0] });
+  const hang = world.addJoint({ a: ball, anchor: [0, 5, 0] });
+  assert.deepEqual(hang.force, [0, 0, 0]);
+  assert.deepEqual(hang.torque, [0, 0, 0]);
+  for (let s = 0; s < 120; s++) world.step(DT);
+  close(hang.force, [0, 98.1, 0], 1e-9, 'the ball joint\'s force');
+  close(hang.torque, [0, 0, 0], 1e-12, 'its torque');
+  assert.ok(Object.isFrozen(hang.force) && hang.force !== hang.force, 'a fresh frozen copy each read');
+  // A 1 m, 10 kg arm held level on a hinge by its stop: 98.1 N up, and its
+  // weight's moment about the hinge, 98.1 N at 0.5 m, 49.05 N·m (measured
+  // 49.04999998: the stop is soft by JOINT_STIFFNESS, and sags 1.3e-5 m).
+  const arm = world.addBody({ size: [1, 0.1, 0.1], position: [3.5, 0, 0], mass: 10 });
+  const hinge = world.addJoint({ type: 'hinge', a: arm, anchor: [3, 0, 0], axis: [0, 0, 1], min: 0 });
+  for (let s = 0; s < 120; s++) world.step(DT);
+  close(hinge.force, [0, 98.1, 0], 1e-6, 'the hinge\'s force');
+  close(hinge.torque, [0, 0, 49.05], 1e-6, 'its torque');
+});
+
+test('every type of joint reads what it holds', () => {
+  // A 10 kg rod, 1 m along x from the joint at the origin, held level, or a
+  // 10 kg body held at its centre: 98.1 N up, and 49.05 N·m about z for the
+  // rod's weight at 0.5 m. A rotation joint holds no point: a ball joint
+  // carries the rod, the rotation joint keeps it level with torque alone.
+  const rod = (type, options) => {
+    const world = new World({ sleeping: false });
+    const a = world.addBody({ size: [1, 0.1, 0.1], position: [0.5, 0, 0], mass: 10 });
+    const joint = world.addJoint({ type, a, anchor: [0, 0, 0], ...options });
+    return { world, joint };
+  };
+  const held = (type, options) => {
+    const world = new World({ sleeping: false });
+    const a = world.addBody({ shape: 'sphere', radius: 0.1, position: [0, -1, 0], mass: 10 });
+    const joint = world.addJoint({ type, a, ...options });
+    return { world, joint };
+  };
+  const cases = [
+    ['fixed', rod('fixed', {}), [0, 98.1, 0], [0, 0, 49.05]],
+    ['hinge driven to its target', rod('hinge', { axis: [0, 0, 1], target: 0, motorForce: 1000 }), [0, 98.1, 0], [0, 0, 49.05]],
+    ['ball driven to its target', rod('ball', { target: [0, 0, 0, 1], motorForce: 1000 }), [0, 98.1, 0], [0, 0, 49.05]],
+    ['ball held by friction', rod('ball', { friction: 1000 }), [0, 98.1, 0], [0, 0, 49.05]],
+    ['slider across its axis', held('slider', { anchor: [0, -1, 0], axis: [1, 0, 0] }), [0, 98.1, 0], [0, 0, 0]],
+    ['slider on its stop', held('slider', { anchor: [0, -1, 0], axis: [0, 1, 0], min: 0 }), [0, 98.1, 0], [0, 0, 0]],
+    ['slider driven to its target', held('slider', { anchor: [0, -1, 0], axis: [0, 1, 0], target: 0, motorForce: 1000 }), [0, 98.1, 0], [0, 0, 0]],
+    ['distance rod', held('distance', { anchorB: [0, 0, 0] }), [0, 98.1, 0], [0, 0, 0]],
+    ['distance spring', held('distance', { anchorB: [0, 0, 0], frequency: 2 }), [0, 98.1, 0], [0, 0, 0]],
+  ];
+  for (const [what, { world, joint }, force, torque] of cases) {
+    for (let s = 0; s < 300; s++) world.step(DT);
+    close(joint.force, force, 1e-5, `${what}: force`);
+    close(joint.torque, torque, 1e-5, `${what}: torque`);
+  }
+  const world = new World({ sleeping: false });
+  const a = world.addBody({ size: [1, 0.1, 0.1], position: [0.5, 0, 0], mass: 10 });
+  const point = world.addJoint({ a, anchor: [0, 0, 0] }), level = world.addJoint({ type: 'rotation', a });
+  for (let s = 0; s < 120; s++) world.step(DT);
+  close(point.force, [0, 98.1, 0], 1e-9, 'the ball joint beside a rotation joint: force');
+  close(point.torque, [0, 0, 0], 1e-12, 'its torque');
+  assert.ok(level.force.every((x) => x === 0), `a rotation joint pushes with no force, got ${level.force}`);
+  close(level.torque, [0, 0, 49.05], 1e-9, 'the rotation joint\'s torque');
+});
+
+test('a jerk reads its peak: a weight dropped onto a rope', () => {
+  // A 1 kg ball 0.1 m below the rope's end, falling 0.9 m to take up its 1 m
+  // of slack, at 4.2 m/s: stopped within a step, the rope pulls 255 N in that
+  // step (measured), 26 times the ball's weight. Every impulse is counted, so
+  // the forces over the 2 s, times the step, are exactly what gravity took
+  // away and the ball's momentum didn't keep.
+  const world = new World({ sleeping: false });
+  const ball = world.addBody({ shape: 'sphere', radius: 0.1, mass: 1, position: [0, -0.1, 0] });
+  const rope = world.addJoint({ type: 'distance', a: ball, anchorB: [0, 0, 0], length: 1, min: 0 });
+  let peak = 0, total = 0;
+  for (let s = 0; s < 120; s++) {
+    world.step(DT);
+    peak = Math.max(peak, rope.force[1]);
+    total += rope.force[1] * DT;
+  }
+  assert.ok(peak > 20 * 9.81, `the peak was ${peak} N`);
+  close(rope.force, [0, 9.81, 0], 1e-6, 'hanging, its force');
+  near(total, 9.81 * 120 * DT + ball.velocity[1], 1e-9, 'the impulse over 2 s');
+});
+
+test('b takes the opposite: what the joint read is each body\'s change of momentum', () => {
+  // No gravity and nothing else touching: a joint's push is all that changes
+  // its bodies' momentum. A 5 kg ball and a 3 kg box on a hinge, at its stops
+  // and its motor, flung apart and spinning: each step, a's momentum changes
+  // by force × dt and b's by the opposite; and a, a ball held at its centre,
+  // turns by torque × dt, its angular momentum I ω with I = 2/5 m r².
+  const world = new World({ gravity: [0, 0, 0], sleeping: false });
+  const a = world.addBody({ shape: 'sphere', radius: 0.2, mass: 5, position: [0, 0, 0], velocity: [-2, 1, 0.5], angularVelocity: [1, 2, 3] });
+  const b = world.addBody({ size: [0.4, 0.2, 0.3], mass: 3, position: [1, 0.3, 0], velocity: [3, 0, -1] });
+  const joint = world.addJoint({ type: 'hinge', a, b, anchor: [0, 0, 0], axis: [0, 0, 1], min: -0.2, max: 0.2, motorSpeed: 3, motorForce: 20 });
+  const I = 2 / 5 * 5 * 0.2 * 0.2;
+  let most = 0, turned = 0;
+  for (let s = 0; s < 30; s++) {
+    const va = a.velocity, vb = b.velocity, wa = a.angularVelocity;
+    world.step(DT);
+    const f = joint.force, t = joint.torque;
+    most = Math.max(most, Math.hypot(...f));
+    turned = Math.max(turned, Math.hypot(...t));
+    for (let k = 0; k < 3; k++) {
+      near(5 * (a.velocity[k] - va[k]), f[k] * DT, 1e-12, `step ${s}: a's change of momentum [${k}]`);
+      near(3 * (b.velocity[k] - vb[k]), -f[k] * DT, 1e-12, `b's [${k}]`);
+      near(I * (a.angularVelocity[k] - wa[k]), t[k] * DT, 1e-12, `a's change of angular momentum [${k}]`);
+    }
+  }
+  assert.ok(most > 100 && turned > 10, `the joint pushed ${most} N and turned ${turned} N·m at most`);
+});
+
+test('a sleeping joint keeps the load it held', () => {
+  const world = new World();
+  const lamp = world.addBody({ shape: 'sphere', radius: 0.1, mass: 10, position: [0, 4, 0] });
+  const chain = world.addJoint({ a: lamp, anchor: [0, 5, 0] });
+  let s = 0;
+  while (!lamp.asleep && s++ < 600) world.step(DT);
+  assert.ok(lamp.asleep, 'it sleeps');
+  const held = chain.force;
+  close(held, [0, 98.1, 0], 1e-9, 'asleep, its force');
+  for (let k = 0; k < 60; k++) world.step(DT);
+  assert.ok(lamp.asleep);
+  assert.deepEqual(chain.force, held);
+});
+
+test('a saved world reads the same forces, and steps on to the same', () => {
+  const world = new World();
+  world.addBody({ type: 'static', size: [20, 1, 20], position: [0, -0.5, 0] });
+  standing(world, 0, true, true)[1].applyImpulse([30, 0, 10]);
+  for (let s = 0; s < 60; s++) world.step(DT);
+  const loaded = World.load(JSON.parse(JSON.stringify(world.save())));
+  const ids = [];
+  for (let j = 0; j < world._joints.slots.top; j++) ids.push(world._joints.slots.id(j));
+  const read = (w) => ids.flatMap((id) => { const j = new Joint(w, id); return [...j.force, ...j.torque]; });
+  assert.ok(read(world).some((x) => x !== 0));
+  assert.deepEqual(read(loaded), read(world));
+  for (let s = 0; s < 30; s++) { world.step(DT); loaded.step(DT); }
+  assert.deepEqual(read(loaded), read(world));
+});
+
 await testAsync('a ragdoll on its motors steps to the same bits with no workers and with them', async () => {
   // Joints run on the stepping thread, the contacts on the workers too: 16
   // driven ragdolls dropped in a heap, every colour handed to the workers.
@@ -1048,6 +1195,32 @@ await testAsync('a ragdoll on its motors steps to the same bits with no workers 
   assert.deepEqual(Array.from(many.transforms), Array.from(one.transforms));
   assert.ok(many._jobs.parallel > 100, `only ${many._jobs.parallel} dispatches went to the workers`);
   assert.ok(one._drives > 0);
+  many.destroy();
+  one.destroy();
+});
+
+await testAsync('joint forces are the same bits with no workers and with them', async () => {
+  // Joints run on the stepping thread, but what they push against comes from
+  // contacts the workers solve: 16 driven ragdolls dropped in a heap.
+  if (!(sharedMemory && cores() > 1)) return console.log('  --  skipped, no workers on this machine');
+  const make = (workers) => {
+    const world = new World({ workers });
+    world.addBody({ type: 'static', size: [40, 1, 40], position: [0, -0.5, 0] });
+    for (let i = 0; i < 16; i++) {
+      for (const b of standing(world, (i % 4) * 0.7, true, i % 2 === 0)) b.setPosition(b.position[0], b.position[1] + 0.3 + (i >> 2) * 1.9, b.position[2]);
+    }
+    return world;
+  };
+  const one = make(0), many = make('auto');
+  many._jobs.least = [1, 1, 1, 1];
+  for (let s = 0; s < 120 && many._jobs.control === null; s++) { one.step(DT); many.step(DT); }
+  assert.ok(await many._jobs.ready(), 'the workers never reported ready');
+  for (let s = 0; s < 120; s++) {
+    one.step(DT); many.step(DT);
+    assert.deepEqual(Array.from(many._joints.force), Array.from(one._joints.force));
+    assert.deepEqual(Array.from(many._joints.torque), Array.from(one._joints.torque));
+  }
+  assert.ok(many._jobs.parallel > 50, `only ${many._jobs.parallel} dispatches went to the workers`);
   many.destroy();
   one.destroy();
 });

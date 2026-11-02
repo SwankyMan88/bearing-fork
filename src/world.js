@@ -35,7 +35,7 @@ import {
 import { Jobs, cores, sharedMemory } from './core/jobs.js';
 import {
   Joints, Joint, addJoint, setJoint, jointOf, jointSlot, dropJoint, dropJointsOf, gather, warmStartJoints, solveJoints,
-  jointSoft, JOINT_STIFFNESS, JOINT_DAMPING_RATIO, plantJoints, groupJoints, jointsCrowded, WORK,
+  jointSoft, JOINT_STIFFNESS, JOINT_DAMPING_RATIO, plantJoints, groupJoints, jointsCrowded, WORK, jointForces,
 } from './joints.js';
 import { Broadphase } from './broadphase.js';
 import { anchored } from './forest.js';
@@ -1034,6 +1034,8 @@ export class World {
     } finally {
       if (parallel) jobs.end();
     }
+    // Each joint's force over the step, read after it (joints.js, JOINT FORCES).
+    if (held > 0) jointForces(this, dt);
     if (touching > 0) {
       const g = this._gravity;
       restitution(this, next, Math.sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]));

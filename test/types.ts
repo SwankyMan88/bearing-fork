@@ -180,6 +180,8 @@ export function joints(): void {
   world.addJoint({ type: 'fixed', a: door, b: frame });
   world.setJoint(hinge, { motorSpeed: 2, motorForce: 500, min: null, type: 'slider' });
   const info: JointInfo = world.jointOf(hinge);
+  const [fx, fy, fz]: readonly [number, number, number] = hinge.force;
+  const twist: number = hinge.torque[2] + fx + fy + fz;
   if (info.type === 'distance') info.length.toFixed();
   if (info.type === 'ball') info.friction.toFixed();
   world.setJoint(hinge, { friction: 1 });

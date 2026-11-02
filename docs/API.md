@@ -65,6 +65,8 @@ Every call, setting and entry, A to Z by its name.
 
 **D** &nbsp; [`world.debugLines()`](#world-debuglines) · [`body.destroy()`](#body-destroy) · [`joint.destroy()`](#joint-destroy) · [`world.destroy()`](#world-destroy) · [Determinism](#determinism)
 
+**F** &nbsp; [`joint.force`](#joint-force)
+
 **G** &nbsp; [`world.gravity`](#world-gravity) · [`world.groundOf()`](#world-groundof)
 
 **H** &nbsp; [Hulls and compounds](#hulls)
@@ -87,7 +89,7 @@ Every call, setting and entry, A to Z by its name.
 
 **S** &nbsp; [`world.save()`](#world-save) · [`body.setAngularVelocity()`](#body-setangularvelocity) · [`body.setAxisAngle()`](#body-setaxisangle) · [`world.setBody()`](#world-setbody) · [`body.setEuler()`](#body-seteuler) · [`world.setJoint()`](#world-setjoint) · [`body.setPosition()`](#body-setposition) · [`body.setRotation()`](#body-setrotation) · [`body.setVelocity()`](#body-setvelocity) · [`world.shapeCast()`](#world-shapecast) · [`world.sleeping`](#world-sleeping) · [Sleeping](#sleeping) · [`body.slot`](#body-slot) · [`world.step()`](#world-step) · [`world.stepCount`](#world-stepcount) · [`world.substeps`](#world-substeps)
 
-**T** &nbsp; [`world.touching()`](#world-touching) · [`world.transforms`](#world-transforms)
+**T** &nbsp; [`joint.torque`](#joint-torque) · [`world.touching()`](#world-touching) · [`world.transforms`](#world-transforms)
 
 **V** &nbsp; [`body.velocity`](#body-velocity)
 
@@ -820,7 +822,7 @@ stepping exactly as the saved world would have.
 Returns: a new [`World`](#world), its own: changing it changes nothing in the world it was saved
 from, or the data.
 
-Throws: `load: data must be what world.save() returned, got …`; `load: data is format …; this Bearing reads format 8`; `load: data is damaged: …`.
+Throws: `load: data must be what world.save() returned, got …`; `load: data is format …; this Bearing reads format 9`; `load: data is damaged: …`.
 
 ```js
 const checkpoint = world.save();
@@ -1234,7 +1236,8 @@ crate.destroy();
 A Joint is a handle to one joint in a world, as a [`Body`](#body) is to a body: `joint.world` is
 its world and `joint.id` its id, and nothing else. Compare `a.id === b.id`, not `a === b`.
 [`world.addJoint`](#world-addjoint) makes one. Change it with [`world.setJoint`](#world-setjoint),
-read it with [`world.jointOf`](#world-jointof).
+read it with [`world.jointOf`](#world-jointof), and what it held over the last step with
+[`joint.force`](#joint-force) and [`joint.torque`](#joint-torque).
 
 <a id="joint-id"></a>
 ### `joint.id` → `number`
@@ -1274,6 +1277,54 @@ const tie = world.addJoint({ a: ball, b: crate });
 world.remove(crate);
 console.log(tie.alive);   // false: a joint goes with its bodies
 ```
+
+<a id="joint-force"></a>
+### `joint.force` → `[x, y, z]`
+
+The force the joint pushed `a` with over the last step, in newtons, world space: its mean over
+the step, a frozen copy. It pushed `b` with the opposite. It is everything the joint did: holding
+its bodies together, its stops, its motor and drive, its friction and its spring. Read it after
+[`step`](#world-step), as [`world.contacts()`](#world-contacts) are, to break a joint that is
+pulled too hard: remove it. Read only.
+
+Throws: `force: this world was destroyed`; `force: this joint was removed`; `joint.force is read only`.
+
+```js
+const head = world.addBody({ shape: 'sphere', radius: 0.12, position: [0, 1.7, 0] });
+const neck = world.addJoint({ a: head, b: crate, anchor: [0, 1.55, 0] });
+world.step(1 / 60);
+const [fx, fy, fz] = neck.force;
+if (Math.sqrt(fx * fx + fy * fy + fz * fz) > 2000) world.remove(neck);   // over 2 kN: it breaks
+```
+
+Notes: a mean over the step, not the end of it, so a jerk shows in full in the step it happens: a
+1 kg ball dropped 0.9 m onto a rope reads 255 N in the step the rope goes taut, 26 times its
+weight, and its weight, 9.81 N, once it hangs. `[0, 0, 0]` before the first step. A joint that
+isn't solved in a step, because its bodies are asleep, keeps what it read at the last step it was:
+it still holds its load, so a sleeping chandelier's chain still reads its weight. The same on every
+machine and with any number of [workers](#world-workers), and saved by
+[`world.save()`](#world-save).
+
+<a id="joint-torque"></a>
+### `joint.torque` → `[x, y, z]`
+
+The torque the joint turned `a` with over the last step, in N·m, world space, about its anchor on
+`a`: its mean over the step, a frozen copy. With [`force`](#joint-force), it is all the joint did
+to `a`; a ball or distance joint, which holds a point, has none but what its friction, stops and
+drive add. Read only.
+
+Throws: `torque: this world was destroyed`; `torque: this joint was removed`; `joint.torque is read only`.
+
+```js
+const shelf = world.addBody({ size: [1, 0.05, 0.3], position: [0.5, 1, 0], mass: 10 });
+const bracket = world.addJoint({ type: 'fixed', a: shelf, anchor: [0, 1, 0] });
+world.step(1 / 60);
+console.log(bracket.torque[2]);   // about 49 N·m: 98.1 N of weight, 0.5 m out
+```
+
+Notes: about the anchor on `a`, where it is now, so a hinge holding a level 1 m, 10 kg arm reads
+49.05 N·m about its axis, its weight at half a metre. `b` took the opposite torque about the same
+point. `[0, 0, 0]` before the first step, and a sleeping joint keeps its last, as `force` does.
 
 <a id="joint-destroy"></a>
 ### `joint.destroy()`
@@ -1691,6 +1742,10 @@ A joint takes some away, and leaves the rest:
 - **What can't move is held fixed.** A joint holds a static, kinematic or character body as a
   point in the world is held: nothing it does moves them. A joint between two bodies neither of
   which is dynamic does nothing. A body's [`lockRotation`](#world-addbody) holds in a joint too.
+- **What a joint carries can be read**, after each step: [`joint.force`](#joint-force) and
+  [`joint.torque`](#joint-torque), its mean push on `a` over the step. A hanging weight reads its
+  weight through its joint, and a jerk its peak. Breaking a joint is the game's to decide: read
+  it, and remove the joint past its limit.
 - **No joints, no cost.** A world without joints runs no joint solver, and a sleeping chain's
   joints cost nothing. A joint with no `target` does no target work.
 

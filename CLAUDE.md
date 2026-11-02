@@ -230,6 +230,16 @@ These were made with Nolan and override the rules below where they differ.
   kept), warm start and one-at-a-time rows by group, trees by tree (`holdTrees`, `F.start`/`F.trees`),
   groups before trees each pass; from 2 groups (measured, `r41least`); `save()` writes back only
   bodies that can move. 100 driven ragdolls 25.4 -> ~6 ms with 'auto', 18-21 ms one thread.
+  Joint forces (2026-11-02, milestone 18, API approved: "Approved, go ahead with joint forces"):
+  `joint.force`/`joint.torque`, read-only fresh copies, the mean over the last step of what the
+  joint pushed `a` with (N; N·m about a's anchor), world space, b the opposite; 0 before the first
+  step; a sleeping joint keeps its last. Summed along the rows actually solved: `apply()` adds into
+  `PUSH`, `save()` calls `pushes()` (torque about a's anchor; on a kept-work read-back RA by one
+  rotate of `localA`), `settleForest()` calls `forestPushes()` over its range (the factor's a-side
+  Jacobian; turning rows first, as `build()` orders them); `gather()` zeroes, `jointForces(world, dt)`
+  divides after the substeps. `force`/`torque` shared with the workers (groups then trees, the
+  one-thread order). Breaking stays in the games. FORMAT 9. Bookkeeping cost, pinned: ragdolls 0-6%,
+  chains 3-9%, active 2-7%.
 - **Continuous collision** (2026-10-15, milestone 13, approved): speculative contacts stay; a pair
   not touching that moves against itself by more than its tolerance in the step (`moving()` in
   `src/contact.js`) asks `impact()` (`src/impact.js`, conservative advancement over velocity,

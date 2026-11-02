@@ -42,7 +42,8 @@ density unless you give one), no tolerances to tune, and nothing to size in adva
 - **Joints**: fixed, ball, hinge, slider, distance and rotation joints, with limits, motors and
   springs, and motors that drive to a target pose, steady however stiff. Chains, ragdolls and
   bridges are solved exactly, all at once, so a 100-link chain hangs at its built length, a slammed
-  door stops on its stop, and a ragdoll with its joints driven to a pose stands on its own feet. See [Joints](docs/API.md#joints).
+  door stops on its stop, and a ragdoll with its joints driven to a pose stands on its own feet. Each joint's force and
+  torque over the last step can be read, to break it. See [Joints](docs/API.md#joints).
 - **Contact events and sensors**: which bodies began and stopped touching in each step, with where
   and how hard they met, read after the step; what touches a body now; and sensors, zones that
   report what enters them and push nothing. See [Contact events and sensors](docs/API.md#events).

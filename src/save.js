@@ -56,9 +56,11 @@ import { COLOURS, DIGITS } from './graph.js';
  * none. 7 since a body can be frozen (world.js, FREEZING: _frozen, _calm):
  * data of format 6 has neither, and its bodies would load with no value for
  * them. 8 since joints drive to targets (joints.js, the target column, and
- * World._drives): data of format 7 has neither.
+ * World._drives): data of format 7 has neither. 9 since joints keep the force
+ * and torque they held over their last step (joints.js, the force and torque
+ * columns), which a sleeping joint still reports: data of format 8 has none.
  */
-export const FORMAT = 8;
+export const FORMAT = 9;
 
 /** The classes a world holds, by the name their objects are written under. */
 const CLASSES = { Slots, Broadphase, Tree, Pairs, Memory, Contacts, Joints, Forest, Events, Mesh, Heightfield, Hull, Parts, Part };

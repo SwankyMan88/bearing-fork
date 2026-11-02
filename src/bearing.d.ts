@@ -630,6 +630,10 @@ export class Joint {
   readonly id: number;
   /** false once removed, with either of its bodies, or once its world is destroyed. */
   readonly alive: boolean;
+  /** The mean force it pushed a with over the last step, N, world space; b took the opposite. A frozen copy. */
+  readonly force: readonly [number, number, number];
+  /** The mean torque it turned a with over the last step, N·m, world space, about its anchor on a. A frozen copy. */
+  readonly torque: readonly [number, number, number];
   /** Same as world.remove(joint). */
   destroy(): void;
 }

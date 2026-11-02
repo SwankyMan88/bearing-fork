@@ -123,6 +123,11 @@ const COLUMNS = [
   ['collide', Uint8Array, 1],
   ['next', Int32Array, 2],        // the next joint in a's list and in b's, as an edge (2j + side) plus 1
   ['impulse', Float64Array, IMPULSES],
+  // What the joint pushed a with over its last solved step, as its mean force
+  // in N and torque about a's anchor in N·m, world space: joint.force and
+  // joint.torque. Within a step, the impulses so far (see JOINT FORCES).
+  ['force', Float64Array, 3],
+  ['torque', Float64Array, 3],
   ['list', Int32Array, 1],        // the joints solved this step, dense: see gather()
   // What a joint worked out from its bodies' pose alone, and the pose it was
   // kept at: see KEPT WORK. Scratch to save().
@@ -175,7 +180,7 @@ export class Joints {
     this.frameA = null; this.frameB = null; this.min = null; this.max = null; this.given = null;
     this.length = null; this.cone = null; this.motorSpeed = null; this.motorForce = null;
     this.friction = null; this.frequency = null; this.dampingRatio = null; this.target = null;
-    this.collide = null; this.next = null; this.impulse = null; this.list = null;
+    this.collide = null; this.next = null; this.impulse = null; this.force = null; this.torque = null; this.list = null;
     this.kept = null; this.work = null; this.union = null; this.label = null; this.of = null;
     this.starts = null; this.grouped = null;
     for (const [name, Type] of COLUMNS) this[name] = new Type(0);
@@ -208,6 +213,8 @@ export class Joints {
   /** Frees slot j, shrinking by the world's quarter rule (see World._remove). */
   release(j) {
     this.impulse.fill(0, j * IMPULSES, j * IMPULSES + IMPULSES);
+    this.force.fill(0, 3 * j, 3 * j + 3);
+    this.torque.fill(0, 3 * j, 3 * j + 3);
     this.slots.release(j);
     const top = this.slots.top;
     if (top <= this.slots.capacity / 4) {
@@ -249,6 +256,14 @@ export class Joint {
   get alive() { return this.#world._jointAlive(this.#id); }
   set alive(_) { readOnly('joint.alive'); }
 
+  /** The mean force it pushed a with over the last step it was solved in, N, world space: a frozen copy. b took the opposite. */
+  get force() { return pushed(this.#world, 'force', this); }
+  set force(_) { readOnly('joint.force'); }
+
+  /** The mean torque it turned a with over that step, N·m, world space, about its anchor on a: a frozen copy. */
+  get torque() { return pushed(this.#world, 'torque', this); }
+  set torque(_) { readOnly('joint.torque'); }
+
   /** Same as world.remove(joint). Does nothing if the joint is already gone. */
   destroy() {
     this.#world._remove('destroy', this);
@@ -265,6 +280,12 @@ export function jointSlot(world, caller, joint) {
   const j = world._joints.slots.slotOf(joint.id);
   if (j < 0) fail(caller, 'this joint was removed');
   return j;
+}
+
+/** joint.force or joint.torque: its column `name`, copied. */
+function pushed(world, name, joint) {
+  const j = jointSlot(world, name, joint), c = world._joints[name];
+  return Object.freeze([c[3 * j], c[3 * j + 1], c[3 * j + 2]]);
 }
 
 /** A joined body's slot: `name` is 'a' or 'b'. */
@@ -656,6 +677,10 @@ export function gather(world) {
     if (awakeB && island[a] !== 0 && type[a] === DYNAMIC) world._wake(a);
     if (type[a] !== DYNAMIC && (b < 0 || type[b] !== DYNAMIC)) continue;
     list[n++] = j;
+    // Its force from here on is this step's (JOINT FORCES); one left out keeps its last.
+    const j3 = 3 * j;
+    J.force[j3] = 0; J.force[j3 + 1] = 0; J.force[j3 + 2] = 0;
+    J.torque[j3] = 0; J.torque[j3 + 1] = 0; J.torque[j3 + 2] = 0;
   }
   J.active = n;
 }
@@ -827,6 +852,9 @@ function solveRange(world, J, from, to, h, bias, keep) {
     const recall = keeps && bias && kept[j] === pose;
     const store = keeps && keep;
     if (!recall) geometry(world, j);
+    // Kept work needs no anchors, but the force counted at the pass's end
+    // (pushes()) takes its moment about a's anchor where a is now.
+    else rotate(world._rotation, 4 * J.a[j], J.localA[3 * j], J.localA[3 * j + 1], J.localA[3 * j + 2], false, RA);
     switch (type) {
       case FIXED:
         frames(world, j);
@@ -1224,6 +1252,7 @@ function settleForest(world, from, to) {
       acc[o + AXIAL] += vec[l];
     }
   }
+  forestPushes(world, from, to);
 }
 
 /** Copies row ROWS[o..] into tree joint t's row m, asking for the speed change that brings its speed to -rate c; returns m + 1. */
@@ -1274,6 +1303,7 @@ function load(world, j) {
  */
 function save(world, j) {
   const J = world._joints, a = J.a[j], b = J.b[j], v = world._velocity, w = world._angular;
+  pushes(J, j);
   const a3 = 3 * a;
   if (ima !== 0) { v[a3] = VA[0]; v[a3 + 1] = VA[1]; v[a3 + 2] = VA[2]; w[a3] = VA[3]; w[a3 + 1] = VA[4]; w[a3 + 2] = VA[5]; }
   if (b < 0 || imb === 0) return;
@@ -1451,7 +1481,7 @@ export const WORK = {
   pairs: CONTACT_WORK.pairs,
   joints: ['type', 'a', 'b', 'localA', 'localB', 'frameA', 'frameB', 'min', 'max', 'given', 'length', 'cone',
     'motorSpeed', 'motorForce', 'friction', 'frequency', 'dampingRatio', 'target', 'impulse', 'kept', 'work',
-    'starts', 'grouped'],
+    'starts', 'grouped', 'force', 'torque'],
   forest: ['joint', 'rows', 'row', 'rhs', 'scale', 'side', 'jointInverse', 'jac', 'up', 'down', 'fresh', 'inTree',
     'body', 'inverse', 'first', 'next', 'since', 'order', 'parent', 'vector', 'start'],
 };
@@ -1629,6 +1659,7 @@ function apply(o, l) {
   VA[0] -= ima * nx; VA[1] -= ima * ny; VA[2] -= ima * nz;
   VB[0] += imb * nx; VB[1] += imb * ny; VB[2] += imb * nz;
   const ax = ROWS[o + 3] * l, ay = ROWS[o + 4] * l, az = ROWS[o + 5] * l;
+  PUSH[0] -= nx; PUSH[1] -= ny; PUSH[2] -= nz; PUSH[3] -= ax; PUSH[4] -= ay; PUSH[5] -= az;
   VA[3] -= IA[0] * ax + IA[1] * ay + IA[2] * az;
   VA[4] -= IA[1] * ax + IA[3] * ay + IA[4] * az;
   VA[5] -= IA[2] * ax + IA[4] * ay + IA[5] * az;
@@ -2201,6 +2232,97 @@ function angles(acc, i) {
     ROWS[r + 3 + k] = 1;
     ROWS[r + 6 + k] = 1;
     apply(r, acc[i + k]);
+  }
+}
+
+// ---- joint forces ----
+//
+// JOINT FORCES. What a joint pushed a with over a step is the sum of every
+// impulse it gave a, in every pass of every substep, divided by the step:
+// its mean force, joint.force, and its mean torque, joint.torque. b took
+// the opposite of each (the torque about b's own anchor differs by the
+// force's moment across any gap between the two anchors).
+//
+// WHY THE SUM, NOT THE LAST ACCUMULATORS. The impulses a joint remembers
+// (Joints.impulse) are each substep's, not the step's: the warm start
+// applies them again, the passes add to them, and what a substep applied is
+// what it ends with, so the last substep's, times the substep count, would
+// be close for a steady load. But that is the end of the step, not its mean,
+// and a jerk (a rope pulled taut mid-step) is in the middle; a held-down
+// tree's rows start each substep from none (warmStartJoints()), so they hold
+// one substep's only; and the scalar rows (a motor's, a stop's, a distance
+// joint's) lie along directions that turn with the bodies, which the
+// accumulators don't record. So each impulse is counted as it is applied,
+// along the very row it was solved with: apply() adds -n λ and -cA λ, what
+// a takes, to PUSH, and save(), the end of each joint's pass, moves PUSH into
+// the joint's columns, the turning part about a's anchor where that pass
+// put it (RA). The trees' rows, which forest.js applies itself, are counted
+// from their factor's own Jacobian (forestPushes()). gather() zeroes the
+// joints the step solves; jointForces() divides by the step at its end.
+//
+// Every operation is + - * /, so the figures are the same on every machine.
+// With workers, each joint's sums are added to by the one thread that solves
+// its group, then by the one that holds its tree, in the same order as on
+// one thread (groupJoints()), so they are the same with any number of
+// workers. A world with no joints never gets here.
+
+/** What the joint in hand has given a in this pass: the impulse, N·s, then the angular impulse about a's centre, N·m·s, world space. */
+const PUSH = new Float64Array(6);
+
+/** Moves PUSH into joint slot j's sums, the turning part about a's anchor (RA, this pass's): the moment about the centre less RA × the push. */
+function pushes(J, j) {
+  const f = J.force, t = J.torque, j3 = 3 * j, px = PUSH[0], py = PUSH[1], pz = PUSH[2];
+  f[j3] += px; f[j3 + 1] += py; f[j3 + 2] += pz;
+  t[j3] += PUSH[3] - (RA[1] * pz - RA[2] * py);
+  t[j3 + 1] += PUSH[4] - (RA[2] * px - RA[0] * pz);
+  t[j3 + 2] += PUSH[5] - (RA[0] * py - RA[1] * px);
+  PUSH[0] = 0; PUSH[1] = 0; PUSH[2] = 0; PUSH[3] = 0; PUSH[4] = 0; PUSH[5] = 0;
+}
+
+/**
+ * The forest's impulses this pass, counted into the sums of each joint of
+ * the trees whose nodes lie in the order from `from` to `to`: row
+ * r's impulse vec[NODE t + r] along a's side of the factor's Jacobian (a's
+ * -n and -cA, forest.js shape()), which is what settleForest() applied. Rows
+ * are laid out by build(): turning rows first (a fixed joint's, slider's or
+ * rotation joint's three, a hinge's two), whose push on a is a torque alone;
+ * then rows at the anchor (a point's three, a distance joint's one), whose
+ * moment about it is nothing, so they give their force alone, exactly 0 of
+ * torque, as a ball joint has; and a slider's two line rows, which act at
+ * b's anchor, so their moment about a's (where a is now) is counted too.
+ */
+function forestPushes(world, from, to) {
+  const J = world._joints, F = J.forest, T = F.count, order = F.order, jac = F.jac, vec = F.vector, f = J.force, tq = J.torque;
+  for (let i = from; i < to; i++) {
+    const t = order[i];
+    if (t >= T) continue;
+    const j = F.joint[t], type = J.type[j], l = NODE * t, ja = 72 * t, j3 = 3 * j, m = F.rows[t];
+    const turns = type === FIXED || type === SLIDER || type === ROTATION ? 3 : type === HINGE ? 2 : 0;
+    if (type === SLIDER) rotate(world._rotation, 4 * J.a[j], J.localA[j3], J.localA[j3 + 1], J.localA[j3 + 2], false, V3);
+    for (let r = 0; r < m; r++) {
+      const x = vec[l + r], q = ja + 6 * r;
+      if (x === 0) continue;
+      if (r < turns) {
+        tq[j3] += jac[q + 3] * x; tq[j3 + 1] += jac[q + 4] * x; tq[j3 + 2] += jac[q + 5] * x;
+        continue;
+      }
+      const px = jac[q] * x, py = jac[q + 1] * x, pz = jac[q + 2] * x;
+      f[j3] += px; f[j3 + 1] += py; f[j3 + 2] += pz;
+      if (type !== SLIDER) continue;
+      tq[j3] += jac[q + 3] * x - (V3[1] * pz - V3[2] * py);
+      tq[j3 + 1] += jac[q + 4] * x - (V3[2] * px - V3[0] * pz);
+      tq[j3 + 2] += jac[q + 5] * x - (V3[0] * py - V3[1] * px);
+    }
+  }
+}
+
+/** At the end of a step: each solved joint's summed impulses, over the step dt, its mean force and torque. */
+export function jointForces(world, dt) {
+  const J = world._joints, list = J.list, n = J.active, f = J.force, t = J.torque;
+  for (let i = 0; i < n; i++) {
+    const j3 = 3 * list[i];
+    f[j3] /= dt; f[j3 + 1] /= dt; f[j3 + 2] /= dt;
+    t[j3] /= dt; t[j3 + 1] /= dt; t[j3 + 2] /= dt;
   }
 }
 

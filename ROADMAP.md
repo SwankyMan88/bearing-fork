@@ -672,7 +672,7 @@ within 0.32 mm for 10 s. Joints without a target keep their bits and their time.
 standing on their motors, sleeping off: 27-28 ms a step on one thread, 30 with workers (the joints
 run on one thread): milestone 19 starts there.
 
-**18. Joint forces ⬜**
+**18. Joint forces ✅** *(approved and done 2026-11-02)*
 *Concepts:* constraint impulses as forces; reading results after a step.
 Each joint's force and torque from the last step, read after it, as contacts are: what a game
 needs to break a joint (dismemberment in game 4, gates and walls in game 2).
@@ -681,6 +681,13 @@ the games: read the force, remove the joint.
 *Needs Nolan:* the API proposal.
 *Done when:* a hanging weight reads its weight through its joint, a jerk reads its peak, and the
 figures are the same with any number of workers.
+*Done (2026-11-02):* `joint.force` and `joint.torque`, the mean over the last step of every
+impulse the joint gave `a`, counted along the row it was solved with in every pass (`apply()`, and
+the tree's own Jacobian), torque about `a`'s anchor. A 10 kg ball hung on a ball joint reads 98.1 N
+and no torque; a level 1 m, 10 kg arm 49.05 N·m about its hinge; a 1 kg ball dropped 0.9 m onto a
+rope 255 N in the step it goes taut; each body's change of momentum matches to 1e-12. A sleeping
+joint keeps its last; the same bits with workers and after a load (format 9); simulation bits
+unchanged.
 
 **19. Many active ragdolls ✅** *(done 2026-11-02; same bits throughout)*
 *Concepts:* profiling joint-heavy scenes; tree solves at scale; workers for joints.
