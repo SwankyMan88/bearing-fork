@@ -21,13 +21,13 @@ const slides = [
     title: 'Time per step, ms (lower is better)',
     note: 'Laptop: Intel i7-1260P, Chrome 152',
     cap: 30, ticks: [0, 10, 20, 30], groups: scenes,
-    // bench/RESULTS.md, 2026-10-29 (25db6d7): the piles' first 5 s, the ragdolls' first 4 s.
+    // bench/RESULTS.md, 2026-11-02 (82b6a59): the piles' first 5 s, the ragdolls' first 4 s.
     values: {
-      'Bearing': [6.59, 15.0, 7.73, 0.411],
-      'Bearing (1 thread)': [12.6, 19.7, 7.65, 0.415],
-      'Rapier': [2.22, 3.52, 1.17, 0.0767],
-      'Jolt': [5.45, 8.03, 2.93, 0.0746],
-      'cannon-es': [21.0, 269, 5.96, 6.78],
+      'Bearing': [6.53, 14.1, 4.71, 0.381],
+      'Bearing (1 thread)': [12.7, 18.0, 8.27, 0.397],
+      'Rapier': [2.37, 3.21, 1.50, 0.0638],
+      'Jolt': [5.78, 7.07, 3.49, 0.0726],
+      'cannon-es': [23.1, 259, 7.95, 4.79],
     },
   },
 ];

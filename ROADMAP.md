@@ -271,6 +271,10 @@ the stack within 1.2× of Rapier and the rays 1.9×, the box pile's last 5 s eve
 against 4.62 ms), the 10,000-box pile 2.1× Rapier with workers; the pyramid, ragdolls and hulls 4
 to 7× Rapier, cannon-es still faster on the ragdolls. Still to do: the desktop's run, and the goals
 confirmed or reset with Nolan.
+*2026-11-02:* again after milestones 17 to 19 (`82b6a59`): with workers the ragdolls 4.71 / 3.14
+ms a step, now faster than cannon-es (7.95 / 5.06), so "faster than cannon-es" is met on every
+scene with workers; on one thread cannon-es is still 1.04 to 1.15× faster on the ragdolls. The
+other scenes within a few percent of 2026-10-29. Still to do: the desktop's run.
 
 ### Part two: querying and level content
 
