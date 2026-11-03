@@ -885,6 +885,12 @@ flipping at 5 rad/s keeps all of it to within 0.001%, at 20 rad/s 99.98%, and at
 It never gains energy, so it never blows up. A sphere or a cube turns at a constant
 angular velocity, exactly.
 
+The first steps to meet something new, a kind of shape touching another, a joint, a fast body,
+run slower than every one after, while the JavaScript engine compiles the code they reach:
+measured, a 200 kg ball hitting a wall of 80 jointed bricks took 31 ms on the first impact in a
+page, and 3.5 ms when the same scene ran again. To keep that out of play, step a small scene with
+what the game will use while it loads: it is the engine's compiling, not Bearing's work.
+
 <a id="world-save"></a>
 ### `world.save()` → `object`
 
