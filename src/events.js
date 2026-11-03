@@ -13,7 +13,7 @@
 
 import { resized } from './core/slots.js';
 
-export const BEGIN = 0, END = 1;
+export const BEGIN = 0, END = 1, IMPACT = 2;
 
 export class Events {
   constructor() {
@@ -38,9 +38,12 @@ export class Events {
     return e;
   }
 
-  /** Bodies idA and idB began touching at (px, py, pz), the normal from A to B, meeting at `speed` m/s. */
-  begin(idA, idB, px, py, pz, nx, ny, nz, speed) {
-    const e = this._add(BEGIN, idA, idB), e3 = 3 * e;
+  /**
+   * Bodies idA and idB began touching at (px, py, pz), the normal from A to B,
+   * meeting at `speed` m/s; or, as an IMPACT, met again while touching.
+   */
+  begin(idA, idB, px, py, pz, nx, ny, nz, speed, type = BEGIN) {
+    const e = this._add(type, idA, idB), e3 = 3 * e;
     this.point[e3] = px; this.point[e3 + 1] = py; this.point[e3 + 2] = pz;
     this.normal[e3] = nx; this.normal[e3 + 1] = ny; this.normal[e3 + 2] = nz;
     this.speed[e] = speed;

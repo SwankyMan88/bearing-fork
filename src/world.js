@@ -46,7 +46,7 @@ import {
   Shape, Manifold, Part, Parts, SPHERE as SPHERE_KIND, CAPSULE as CAPSULE_KIND, BOX as BOX_KIND, HULL as HULL_KIND,
 } from './collide.js';
 import { ray, shapeCast as cast, overlap as overlapping, sense, sweep } from './query.js';
-import { Events, END } from './events.js';
+import { Events, END, IMPACT } from './events.js';
 import { walk, settle, CHARACTER } from './character.js';
 import { lockedInverse } from './contact.js';
 import { cos, quatMultiply, axesOf } from './core/math.js';
@@ -689,8 +689,8 @@ export class World {
   }
 
   /**
-   * The last step's contact events: which pairs began touching and which
-   * stopped, as fresh plain objects. Given a body, only its own, each turned
+   * The last step's contact events: which pairs began touching, which met
+   * again while touching, and which stopped, as fresh plain objects. Given a body, only its own, each turned
    * so that `a` is that body. A body removed since still has its events, its
    * handle reading as dead, so a removed body is taken here.
    */
@@ -714,7 +714,7 @@ export class World {
       // Turned round, the normal points the other way; 0 - x keeps a zero from becoming -0.
       const i3 = 3 * i, n = e.normal, k = (x) => (turned ? 0 - x : x);
       out.push({
-        type: 'begin', a: new Body(this, a), b: new Body(this, b),
+        type: e.type[i] === IMPACT ? 'impact' : 'begin', a: new Body(this, a), b: new Body(this, b),
         point: [e.point[i3], e.point[i3 + 1], e.point[i3 + 2]],
         normal: [k(n[i3]), k(n[i3 + 1]), k(n[i3 + 2])],
         speed: e.speed[i],
@@ -1047,9 +1047,9 @@ export class World {
     }
     // Each joint's force over the step, read after it (joints.js, JOINT FORCES).
     if (held > 0) jointForces(this, dt);
+    const g = this._gravity, gravity = Math.sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
     if (touching > 0) {
-      const g = this._gravity;
-      restitution(this, next, Math.sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]));
+      restitution(this, next, gravity);
       store(this, next);
     }
     // The catch's sweeps look for bodies out of their fat boxes where the
@@ -1057,7 +1057,7 @@ export class World {
     // with the same step and epoch that list would be taken for this one.
     this._straysAt = -1;
     this._catch(next);
-    if (touching > 0) touched(this, pairs, next);
+    if (touching > 0) touched(this, pairs, next, gravity);
 
     const p = this._position, q = this._rotation, framed = this._framedCount > 0 ? this._framed : null;
     const frozen = this._frozen;

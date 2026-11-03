@@ -7,6 +7,15 @@ All notable changes to Bearing are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Impact events.** `world.contacts()` gives `{ type: 'impact', a, b, point, normal, speed }`, a
+  begin's fields, when two bodies already touching meet again: a box sliding on a level mesh into a
+  wall of the same mesh, which gave no event at all before, or a sword resting on a shield swung
+  into it. It comes when the pair's fastest closing speed rose since the last step by more than a
+  bounce too small to see, so steady pressing gives none. Every hit is now a begin or an impact.
+  The save format is 11.
+
 ## [1.0.0] - 2026-11-03
 
 Bearing 1.0. The whole API was gone through before it, as Winding's was, so that code written

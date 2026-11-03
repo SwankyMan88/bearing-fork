@@ -109,6 +109,7 @@ import { resized } from './core/slots.js';
 import { impact, posed, UNSURE } from './impact.js';
 import { COMPLIANCE } from './forest.js';
 import { COLOURS, DIGITS, OVERFLOW } from './graph.js';
+import { BEGIN, IMPACT } from './events.js';
 
 const DYNAMIC = 0, STATIC = 1;
 const BOX = 0, SPHERE_SHAPE = 1, CAPSULE_SHAPE = 2, HULL_SHAPE = 3, MESH = 5;   // World's shape codes; a heightfield is 6
@@ -2174,13 +2175,22 @@ export function crowded(c, least) {
  * deepest point, moved on by half of what the two bodies moved this step, so
  * it lands where they met rather than where the step started them; the
  * pair's normal; and the fastest closing speed among its points at impact.
+ *
+ * A pair already touching that meets again, a box sliding on a level mesh
+ * into a wall of the same mesh or a sword resting on a shield swung into it,
+ * is an impact, at its fastest point the solver pushed: when that point's
+ * closing speed rose since the last step by more than the bounce cut-off
+ * (restitution(), below), the speed of a hit too small to see. A rise, not
+ * the speed: a ragdoll's head pressed on its own arm, its joints pulling it
+ * in and the contact pushing it out, met at a steady 0.12 m/s every step,
+ * over the cut-off and no hit.
  */
-export function touched(world, pairs, c) {
-  const events = world._events, p3 = world._position, start = world._start, row = c.row;
+export function touched(world, pairs, c, gravity) {
+  const events = world._events, row = c.row, twice = 2 * gravity;
   // In the order narrow() found them (graph.js, arrange), so events come in
   // pair order and a mesh pair's manifolds come together.
   for (let f = 0; f < c.count;) {
-    const p = c.pair[row[f]];
+    const first = f, p = c.pair[row[f]];
     // Any one of a mesh pair's manifolds touching will do.
     let hit = -1;
     for (; f < c.count && c.pair[row[f]] === p; f++) {
@@ -2190,26 +2200,49 @@ export function touched(world, pairs, c) {
       for (let k = 0; k < c.points[m] && !meets; k++) meets = c.maxNormalImpulse[m * P + k] > 0;
       if (meets) hit = m;
     }
-    const now = hit >= 0 ? 1 : 0;
-    if (now === pairs.touching[p]) continue;
-    pairs.touching[p] = now;
-    if (now === 0) {
-      events.end(pairs.idA[p], pairs.idB[p]);
+    if (hit < 0) {
+      if (pairs.touching[p] === 1) {
+        pairs.touching[p] = 0;
+        events.end(pairs.idA[p], pairs.idB[p]);
+      }
       continue;
     }
-    let deepest = hit * P, speed = 0;
+    // The fastest a point the solver pushed met at, kept for the next step.
+    let fast = -1, at = -1, speed = 0;
+    for (let r = first; r < f; r++) {
+      const m = row[r];
+      for (let k = 0; k < c.points[m]; k++) {
+        const i = m * P + k, s = -c.relativeVelocity[i];
+        if (s > speed && c.maxNormalImpulse[i] > 0) { speed = s; fast = m; at = i; }
+      }
+    }
+    const rise = speed - pairs.closing[p];
+    pairs.closing[p] = speed;
+    if (pairs.touching[p] === 1) {
+      if (rise > 0 && rise * rise > twice * c.tolerance[fast]) met(world, pairs, c, p, fast, at, speed, IMPACT);
+      continue;
+    }
+    pairs.touching[p] = 1;
+    let deepest = hit * P;
+    speed = 0;
     for (let k = 0; k < c.points[hit]; k++) {
       const i = hit * P + k;
       if (c.separation[i] < c.separation[deepest]) deepest = i;
       if (-c.relativeVelocity[i] > speed) speed = -c.relativeVelocity[i];
     }
-    const a3 = 3 * c.a[hit], b3 = 3 * c.b[hit], d3 = 3 * deepest, h3 = 3 * hit;
-    events.begin(pairs.idA[p], pairs.idB[p],
-      c.point[d3] + (c.shift[d3] + p3[a3] - start[a3] + p3[b3] - start[b3]) * 0.5,
-      c.point[d3 + 1] + (c.shift[d3 + 1] + p3[a3 + 1] - start[a3 + 1] + p3[b3 + 1] - start[b3 + 1]) * 0.5,
-      c.point[d3 + 2] + (c.shift[d3 + 2] + p3[a3 + 2] - start[a3 + 2] + p3[b3 + 2] - start[b3 + 2]) * 0.5,
-      c.normal[h3], c.normal[h3 + 1], c.normal[h3 + 2], speed);
+    met(world, pairs, c, p, hit, deepest, speed, BEGIN);
   }
+}
+
+/** A begin or impact for pair p, at point i of manifold m, moved on by half what its bodies moved. */
+function met(world, pairs, c, p, m, i, speed, type) {
+  const p3 = world._position, start = world._start;
+  const a3 = 3 * c.a[m], b3 = 3 * c.b[m], i3 = 3 * i, m3 = 3 * m;
+  world._events.begin(pairs.idA[p], pairs.idB[p],
+    c.point[i3] + (c.shift[i3] + p3[a3] - start[a3] + p3[b3] - start[b3]) * 0.5,
+    c.point[i3 + 1] + (c.shift[i3 + 1] + p3[a3 + 1] - start[a3 + 1] + p3[b3 + 1] - start[b3 + 1]) * 0.5,
+    c.point[i3 + 2] + (c.shift[i3 + 2] + p3[a3 + 2] - start[a3 + 2] + p3[b3 + 2] - start[b3 + 2]) * 0.5,
+    c.normal[m3], c.normal[m3 + 1], c.normal[m3 + 2], speed, type);
 }
 
 /** How fast b moves against a at a point, along the unit d whose turning terms are at jac[j..] (see J). */

@@ -89,11 +89,13 @@ function reference(world, bodies) {
 
 const isSensor = (world, bodies, id) => bodies.some((b) => String(b.id) === id && b.alive && world.bodyOf(b).sensor);
 
-/** Plays the step's events onto `now`, checking each pair alternates begin, end, begin, from not touching. */
+/** Plays the step's events onto `now`, checking each pair alternates begin, end, begin, from not touching, impacts between. */
 function play(events, now, step) {
   for (const e of events) {
     const k = key(e.a.id, e.b.id);
-    if (e.type === 'begin') {
+    if (e.type === 'impact') {
+      assert.ok(now.has(k), `step ${step}: an impact for ${k}, which wasn't touching`);
+    } else if (e.type === 'begin') {
       assert.ok(!now.has(k), `step ${step}: a second begin for ${k}`);
       now.add(k);
     } else {
@@ -315,6 +317,42 @@ test('a box landing across many triangles of a mesh begins touching it once', ()
   const all = [];
   for (let i = 0; i < 120; i++) { world.step(DT); all.push(...world.contacts()); }
   assert.deepEqual(all.map((e) => [e.type, e.a.id, e.b.id]), [['begin', mesh.id, box.id]]);
+});
+
+test('bodies already touching that meet again give an impact, once, not a begin', () => {
+  // A box resting on a level mesh, driven into a wall of the same mesh: one
+  // pair throughout, so before impacts it was never told of the wall at all.
+  const world = new World();
+  const vertices = [-5, 0, -5, 5, 0, -5, 5, 0, 5, -5, 0, 5, 3, 0, -5, 3, 2, -5, 3, 2, 5, 3, 0, 5];
+  const mesh = world.addBody({ shape: 'mesh', vertices, indices: [0, 2, 1, 0, 3, 2, 4, 6, 5, 4, 7, 6] });
+  const box = world.addBody({ position: [0, 0.5, 0], friction: 0 });
+  for (let i = 0; i < 30; i++) world.step(DT);
+  box.setVelocity(8, 0, 0);
+  const seen = [];
+  for (let i = 0; i < 60; i++) { world.step(DT); seen.push(...world.contacts(box)); }
+  assert.deepEqual(seen.map((e) => [e.type, e.b.id]), [['impact', mesh.id]]);
+  const [hit] = seen;
+  assert.ok(Math.abs(hit.speed - 8) < 0.01, `met at ${hit.speed} m/s`);
+  assert.deepEqual(hit.normal, [1, 0, 0]);
+  assert.ok(Math.abs(hit.point[0] - 3) < 0.01 && hit.point[1] >= 0 && hit.point[1] <= 1, `at ${hit.point}`);
+  // A box resting on another, struck down onto it: an impact at the strike's
+  // speed, from the struck box's side as from the other's, and none while
+  // they rest after.
+  const two = new World();
+  two.addBody({ type: 'static', size: [10, 1, 10], position: [0, -0.5, 0] });
+  const low = two.addBody({ position: [0, 0.5, 0] }), top = two.addBody({ position: [0, 1.5, 0] });
+  for (let i = 0; i < 60; i++) two.step(DT);
+  top.setVelocity(0, -5, 0);
+  two.step(DT);
+  const [struck] = two.contacts(top), [under] = two.contacts(low).filter((e) => e.b.id === top.id);
+  assert.equal(struck.type, 'impact');
+  assert.ok(Math.abs(struck.speed - 5) < 0.05, `met at ${struck.speed} m/s`);
+  assert.deepEqual(struck.normal.map((x) => Math.round(x) + 0), [0, -1, 0]);
+  assert.deepEqual([under.type, under.speed, under.normal.map((x) => Math.round(x) + 0)], ['impact', struck.speed, [0, 1, 0]]);
+  for (let i = 0; i < 120; i++) {
+    two.step(DT);
+    assert.deepEqual(two.contacts().filter((e) => e.type === 'impact'), [], `an impact ${i + 1} steps after`);
+  }
 });
 
 test('queries don\'t see sensors', () => {

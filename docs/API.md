@@ -19,8 +19,8 @@ of numbers may be given as); `BodyType`, `ShapeType` and `JointType`; `WorldOpti
 (what [`bodyOf`](#world-bodyof) gives); `JointOptions`, `FixedJointOptions`, `BallJointOptions`,
 `HingeJointOptions`, `SliderJointOptions`, `DistanceJointOptions`, `RotationJointOptions` and
 `JointChanges`; `JointInfo` (what [`jointOf`](#world-jointof) gives); `RayOptions`,
-`CastOptions`, `OverlapOptions`, `QueryShape` and `Hit`; `ContactEvent`, `BeginEvent` and
-`EndEvent`; `Ground`; `DebugLineOptions`; `GlbOptions`; and `SavedWorld`.
+`CastOptions`, `OverlapOptions`, `QueryShape` and `Hit`; `ContactEvent`, `BeginEvent`, `ImpactEvent`
+and `EndEvent`; `Ground`; `DebugLineOptions`; `GlbOptions`; and `SavedWorld`.
 
 <a id="conventions"></a>
 ## Conventions
@@ -775,15 +775,17 @@ for (const body of world.overlap({ shape: 'sphere', radius: 4 }, blast)) body.ap
 <a id="world-contacts"></a>
 ### `world.contacts(body?)` → `Array`
 
-The last step's contact events: which pairs of bodies began touching in it, and which stopped. Read
-it after each step, in the same place you step. Given a body, only that body's events, each turned
+The last step's contact events: which pairs of bodies began touching in it, which met again while
+touching, and which stopped. Read it after each step, in the same place you step. Given a body, only that body's events, each turned
 so that `a` is that body. See [Contact events and sensors](#events).
 
 Returns: an array of fresh plain objects, in the order the step found them (the same order every
 run). A begin is `{ type: 'begin', a, b, point, normal, speed }`: `a` and `b` are the two
 [`Body`](#body) handles, `point` is where they met and `normal` the unit direction from `a`
 towards `b` there, both world-space arrays of 3, and `speed` is how fast they closed along `normal`
-when they met, in m/s, 0 or more: for the loudness of a sound, or damage. An end is
+when they met, in m/s, 0 or more: for the loudness of a sound, or damage. An impact,
+`{ type: 'impact', a, b, point, normal, speed }`, has a begin's fields: two bodies already touching
+met again, as a sword resting on a shield and swung into it does. An end is
 `{ type: 'end', a, b }`. `[]` before the first step, and after a step in which nothing changed.
 
 Throws: `contacts: this world was destroyed`; `contacts: body must be a Body, got …`; `contacts: body belongs to another world`.
@@ -791,7 +793,7 @@ Throws: `contacts: this world was destroyed`; `contacts: body must be a Body, go
 ```js
 world.step(1 / 60);
 for (const e of world.contacts()) {
-  if (e.type === 'begin' && e.speed > 2) console.log('thud', e.point, e.speed);
+  if (e.type !== 'end' && e.speed > 2) console.log('thud', e.point, e.speed);
 }
 for (const e of world.contacts(crate)) {
   if (e.type === 'end') console.log('crate let go of', e.b.id);
@@ -920,7 +922,7 @@ stepping exactly as the saved world would have.
 Returns: a new [`World`](#world), its own: changing it changes nothing in the world it was saved
 from, or the data.
 
-Throws: `load: data must be what world.save() returned, got …`; `load: this data was saved by …, and this is …; a save loads only into the version that made it`; `load: data is format …; this Bearing reads format 10`; `load: data is damaged: …`.
+Throws: `load: data must be what world.save() returned, got …`; `load: this data was saved by …, and this is …; a save loads only into the version that made it`; `load: data is format …; this Bearing reads format 11`; `load: data is damaged: …`.
 
 ```js
 const checkpoint = world.save();
@@ -1881,7 +1883,7 @@ drive settles that much sooner, which is what a pose wants.
 
 Games need to know when things touch: a crate lands and a thud plays, a player walks into a coin,
 something enters a goal. After each step, [`world.contacts()`](#world-contacts) lists the pairs
-that began touching in it and the pairs that stopped, and [`world.touching(body)`](#world-touching)
+that began touching in it, the pairs already touching that met again, and the pairs that stopped, and [`world.touching(body)`](#world-touching)
 says what touches a body now. Sensors are bodies that notice what overlaps them and push nothing.
 
 ```js
@@ -1903,9 +1905,21 @@ for (const e of world.contacts(coin)) {
 - **Begin and end, once each.** A pair's `begin` comes in the step it starts touching, and its
   `end` in the step it stops, and never two begins without an end between. A body against a mesh
   or heightfield is one pair, however many of its triangles it touches.
-- **No stay events.** A pair still touching writes nothing. A stay event a step for every touching
-  pair would be 30,000 a step for a resting pile of 10,000 boxes, and sleeping bodies, whose
-  contacts nothing looks at, would have to be walked to give them. Ask
+- **Impacts: touching, and hit again.** A pair already touching that meets again writes an
+  `impact`, with a begin's point, normal and speed: a box sliding along a level mesh into a wall of
+  the same mesh (one pair, the mesh, throughout), a sword resting on a shield swung into it, a box
+  struck down onto the one it rests on. It comes when the fastest closing speed among the points
+  the step pushed apart rose since the last step by more than the speed of a bounce too small to
+  see, √(2 g tolerance) (see [Contacts](#contacts)): 31 cm/s for two 1 m boxes, 10 cm/s for 10 cm
+  ones. A rise, not a speed: a ragdoll's head pressed on its own arm, its joints pulling one way
+  and the contact the other, closes at a steady 12 cm/s every step and is no hit. One impact a
+  pair a step at most, at its fastest point. So every hit worth hearing is a begin or an impact,
+  and one check, `e.type !== 'end'`, reads both. Settled piles and ragdolls write none: measured,
+  a pile of 1,000 boxes kept awake from its second second on, and 32 ragdolls after their fifth,
+  but for a limb's occasional knock.
+- **No stay events.** A pair still touching, and not hit again, writes nothing. A stay event a
+  step for every touching pair would be 30,000 a step for a resting pile of 10,000 boxes, and
+  sleeping bodies, whose contacts nothing looks at, would have to be walked to give them. Ask
   [`touching()`](#world-touching) instead, when you want to know.
 - **Removed bodies end their touches.** Their `end` events come with the next step, the removed
   body's handle dead. A body added already touching something begins touching it at the next
@@ -1923,7 +1937,7 @@ for (const e of world.contacts(coin)) {
   size: 0.3 mm for two 40 cm balls passing at 0.9 m/s. Against a flat face the normal holds, and
   there is no such error.
 - **Events cost nothing when nothing changes.** The step writes an event only when a pair starts or
-  stops touching, into storage it reuses, and builds objects only when you call `contacts()`.
+  stops touching, or is hit again, into storage it reuses, and builds objects only when you call `contacts()`.
   Measured on a settled pile of 1,000 boxes kept awake, and while it landed, steps cost the same as
   before events, within 2% either way, run alternately in one process.
 

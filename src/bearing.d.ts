@@ -308,6 +308,16 @@ export interface BeginEvent {
   speed: number;
 }
 
+/** Two bodies already touching met again in the last step, a begin's fields: where, which way, how fast, m/s. */
+export interface ImpactEvent {
+  type: 'impact';
+  a: Body;
+  b: Body;
+  point: [number, number, number];
+  normal: [number, number, number];
+  speed: number;
+}
+
 /** Two bodies stopped touching in the last step. A removed body's handle reads as dead. */
 export interface EndEvent {
   type: 'end';
@@ -315,7 +325,7 @@ export interface EndEvent {
   b: Body;
 }
 
-export type ContactEvent = BeginEvent | EndEvent;
+export type ContactEvent = BeginEvent | ImpactEvent | EndEvent;
 
 /** What raycast, raycastAll and shapeCast find. */
 export interface Hit {

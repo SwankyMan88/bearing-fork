@@ -54,6 +54,7 @@ export class Pairs {
     this.slip = new Float64Array(0);       // how far the anchor has slipped while friction held it, a world vector (contact.js, store)
     this.twist = new Float64Array(0);      // the manifold's rolling and twist friction, an angular impulse, world vector
     this.touching = new Uint8Array(0);     // 1 while its bodies touch, as of the last step that looked
+    this.closing = new Float64Array(0);    // while touching, the fastest a pushed point met at in that step, m/s (contact.js, touched)
     this.checked = new Float64Array(0);    // World._pairEpoch when it was last found pairable, its bodies the same (holds)
     this.verdict = new Int32Array(0);      // within a narrowphase pass, what the workers found for it (contact.js, LOOKED)
     // A convex pair's kept manifold (contact.js, reused), by pair: 1 + its
@@ -101,6 +102,7 @@ export class Pairs {
     this.idA = resized(this.idA, c); this.idB = resized(this.idB, c);
     this.points = resized(this.points, c);
     this.touching = resized(this.touching, c);
+    this.closing = resized(this.closing, c);
     this.checked = resized(this.checked, c);
     this.verdict = resized(this.verdict, c);
     this.cache = resized(this.cache, c);
@@ -305,6 +307,7 @@ export class Pairs {
     this.idA[to] = this.idA[from]; this.idB[to] = this.idB[from];
     this.points[to] = this.points[from];
     this.touching[to] = this.touching[from];
+    this.closing[to] = this.closing[from];
     this.checked[to] = this.checked[from];
     this.verdict[to] = this.verdict[from];
     this.cache[to] = this.cache[from];
@@ -322,7 +325,7 @@ export class Pairs {
     if (i === j) return;
     swap(this.a, i, j, 1); swap(this.b, i, j, 1);
     swap(this.idA, i, j, 1); swap(this.idB, i, j, 1);
-    swap(this.points, i, j, 1); swap(this.touching, i, j, 1); swap(this.checked, i, j, 1); swap(this.cache, i, j, 1);
+    swap(this.points, i, j, 1); swap(this.touching, i, j, 1); swap(this.closing, i, j, 1); swap(this.checked, i, j, 1); swap(this.cache, i, j, 1);
     if (this.cache[i] !== 0) this.cacheOwner[this.cache[i] - 1] = i;
     if (this.cache[j] !== 0) this.cacheOwner[this.cache[j] - 1] = j;
     swap(this.pid, i, j, P); swap(this.normalImpulse, i, j, P); swap(this.friction, i, j, 3); swap(this.slip, i, j, 3); swap(this.twist, i, j, 3);
