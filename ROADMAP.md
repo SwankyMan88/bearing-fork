@@ -751,8 +751,10 @@ theirs; `ShapeType` for the type `Shape`.
 
 ### After 1.0
 
-- **2D**, as a separate module with the same conventions (rule 106). *Needs Nolan first:* pixel
-  units with y down, as Winding's 2D view has, or metres with y up (rule 50).
+- **2D**, as a separate module with the same conventions (rule 106), shipped in this package as
+  `bearing-physics/2d` (`World2D`, `Body2D`, `Joint2D`, as Winding names `Camera2D`). Units
+  settled (2026-11-03): metres, with Winding's 2D axes, y down and positive angles clockwise.
+  Scoped at about 9.5 milestones, joints the largest; not started until a 2D game is planned.
 - Not in Bearing: a vehicle controller and a ragdoll builder. Arcade handling and a humanoid from
   a config file are game feel, built from raycasts, forces, joints and pose motors Bearing already
   gives, so they belong in the games' shared foundation (Nolan, 2026-10-30: these updates must
@@ -1045,3 +1047,10 @@ Winding's way, copied before the first one:
   cannon-es on every scene with workers (on one thread its ragdolls are still 1.04 to 1.15 times
   faster); 100 active ragdolls in about 6 ms with workers; stacks stand wherever Rapier's and
   Jolt's do. The desktop's comparison was left for later, at Nolan's word.
+- **2026-11-03.** 2D scoped and its units settled (Nolan: "do what you'd recommend for the
+  units. Try to match Winding"). Winding's 2D unit is a CSS pixel; Bearing's tolerances would
+  hold in pixels, but its real defaults would not (Earth's gravity needs a pixels-per-metre figure
+  nothing fixes). So metres, kilograms and seconds, with Winding's axes, y down and clockwise
+  angles, so positions and angles copy into Winding unchanged and the 2D camera's zoom is the
+  pixels per metre. Density 1000 kg/m², a slab 1 m deep. Not started: every game in the series is
+  3D.
