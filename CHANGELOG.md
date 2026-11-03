@@ -7,6 +7,14 @@ All notable changes to Bearing are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Elliptical joint cones.** A ball or rotation joint's `cone` takes two angles, `[toward, across]`:
+  how far `axis` may swing toward the new option `swing`, and at right angles to it, as a shoulder
+  swings further forward than up. Its edge is a rim the axis slides round, as a frictionless one
+  would. `swing` defaults to the world's x, y or z most at right angles to `axis`. One angle is
+  the round cone as before, to the bit. The save format is 13.
+
 ## [1.1.0] - 2026-11-03
 
 What the games need first from 1.x, added without changing anything 1.0 code relies on. A hit

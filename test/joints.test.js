@@ -1260,3 +1260,72 @@ await testAsync('joint forces are the same bits with no workers and with them', 
   many.destroy();
   one.destroy();
 });
+
+test('an elliptical cone stops an arm at its edge every way round, and the arm slides along it', () => {
+  // An arm along x, free to swing 90° toward z (swing) and 30° toward y. Shoved
+  // each way round, it never passes the edge r(φ) = ab / √(b² cos² φ + a² sin² φ)
+  // of where it is, and comes to rest on it.
+  const A = Math.PI / 2, B = Math.PI / 6;
+  const edge = (phi) => A * B / Math.sqrt((B * Math.cos(phi)) ** 2 + (A * Math.sin(phi)) ** 2);
+  for (const [type, phi] of [['ball', 0], ['ball', Math.PI / 2], ['ball', Math.PI / 4], ['ball', 4], ['rotation', Math.PI / 2], ['rotation', 1]]) {
+    const world = new World({ gravity: [0, 0, 0] });
+    const post = world.addBody({ type: 'static', size: [0.2, 0.2, 0.2] });
+    const arm = world.addBody({ size: [1, 0.1, 0.1], position: [0.6, 0, 0] });
+    const limit = { axis: [1, 0, 0], cone: [A, B], swing: [0, 0, 1] };
+    if (type === 'ball') world.addJoint({ type, a: arm, b: post, anchor: [0.1, 0, 0], ...limit });
+    else {
+      world.addJoint({ a: arm, b: post, anchor: [0.1, 0, 0] });
+      world.addJoint({ type, a: arm, b: post, ...limit, frictionForce: 1e-9 });
+    }
+    // u = z, v = x × z = -y: pushed at its tip toward phi.
+    const push = [0, -40 * Math.sin(phi), 40 * Math.cos(phi)];
+    let past = -Infinity, theta = 0, at = 0;
+    for (let s = 0; s < 240; s++) {
+      const p = arm.position, r = [p[0] - 0.1, p[1], p[2]];
+      arm.applyTorque([r[1] * push[2] - r[2] * push[1], r[2] * push[0] - r[0] * push[2], r[0] * push[1] - r[1] * push[0]]);
+      world.step(DT);
+      const x = turned(arm.rotation, [1, 0, 0]), s2 = Math.hypot(x[1], x[2]);
+      theta = Math.acos(Math.min(1, x[0]));
+      at = Math.atan2(-x[1] / s2, x[2] / s2);
+      past = Math.max(past, theta - edge(at));
+    }
+    const most = type === 'ball' ? 0.001 : 0.003;
+    assert.ok(past < most, `${type} pushed toward ${phi}: ${past} rad past the edge`);
+    assert.ok(Math.abs(theta - edge(at)) < most, `${type} pushed toward ${phi}: at rest ${theta} rad, the edge ${edge(at)}`);
+    // Pushed between the two, it slides round toward the wide way, as on a frictionless rim.
+    if (phi === Math.PI / 4) assert.ok(Math.abs(at) < Math.PI / 4 - 0.2, `stayed at ${at}`);
+  }
+});
+
+test('cone and swing read back as given, swing defaults square to the axis, and setJoint turns it', () => {
+  const world = new World({ gravity: [0, 0, 0] });
+  const post = world.addBody({ type: 'static', size: [0.2, 0.2, 0.2] });
+  const arm = world.addBody({ size: [1, 0.1, 0.1], position: [0.6, 0, 0] });
+  const round = world.addJoint({ a: arm, b: post, anchor: [0.1, 0, 0], axis: [1, 0, 0], cone: 0.4 });
+  assert.deepEqual([world.jointOf(round).cone, world.jointOf(round).swing], [0.4, null]);
+  world.remove(round);
+  // Not given, the first angle faces the world axis most square to `axis`: y here.
+  const joint = world.addJoint({ a: arm, b: post, anchor: [0.1, 0, 0], axis: [1, 0, 0], cone: [0.2, 1] });
+  assert.deepEqual([world.jointOf(joint).cone, world.jointOf(joint).swing], [[0.2, 1], null]);
+  const swung = (direction) => {
+    arm.setAngularVelocity(0, 0, 0).setRotation([0, 0, 0, 1]).setPosition(0.6, 0, 0);
+    const r = [0.5, 0, 0], F = direction.map((x) => x * 40);
+    let theta = 0;
+    for (let s = 0; s < 120; s++) {
+      arm.applyTorque([r[1] * F[2] - r[2] * F[1], r[2] * F[0] - r[0] * F[2], r[0] * F[1] - r[1] * F[0]]);
+      world.step(DT);
+      theta = Math.acos(Math.min(1, turned(arm.rotation, [1, 0, 0])[0]));
+    }
+    return theta;
+  };
+  assert.ok(Math.abs(swung([0, 1, 0]) - 0.2) < 0.002 && Math.abs(swung([0, 0, 1]) - 1) < 0.002);
+  // Turned to face z, the narrow way is z.
+  world.setJoint(joint, { swing: [0, 0, 1] });
+  assert.deepEqual(world.jointOf(joint).swing, [0, 0, 1]);
+  assert.ok(Math.abs(swung([0, 0, 1]) - 0.2) < 0.002 && Math.abs(swung([0, 1, 0]) - 1) < 0.002);
+  // jointOf round-trips, and null goes back to the default.
+  world.setJoint(joint, world.jointOf(joint));
+  assert.deepEqual(world.jointOf(joint).swing, [0, 0, 1]);
+  world.setJoint(joint, { swing: null });
+  assert.equal(world.jointOf(joint).swing, null);
+});

@@ -66,9 +66,11 @@ import { COLOURS, DIGITS } from './graph.js';
  * jointOf reads back: data of format 9 has none. 11 since a touching pair
  * keeps how fast it last met (pairs.js, the closing column), which impact
  * events are measured from: data of format 10 has none. 12 since a body
- * has a group (World._group): data of format 11 has none.
+ * has a group (World._group): data of format 11 has none. 13 since a cone
+ * may be an ellipse (joints.js, the cone2, swing and facing columns): data of
+ * format 12 has none.
  */
-export const FORMAT = 12;
+export const FORMAT = 13;
 
 /**
  * The version of Bearing this is, stamped into every save: package.json's,

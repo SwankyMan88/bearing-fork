@@ -192,6 +192,11 @@ export function joints(): void {
   const hinge: Joint = world.addJoint({ type: 'hinge', a: door, b: frame, anchor: [0, 1, 0], axis: [0, 1, 0], min: 0, max: Math.PI / 2 });
   world.addJoint({ a: door, anchor: [0, 5, 0] });
   world.addJoint({ type: 'ball', a: door, b: null, axis: [0, -1, 0], cone: 0.5, min: -0.3, frictionForce: 2 });
+  const shoulder = world.addJoint({ type: 'ball', a: door, b: frame, axis: [1, 0, 0], cone: [Math.PI / 2, Math.PI / 6], swing: [0, 0, 1] });
+  const shoulderInfo = world.jointOf(shoulder);
+  const reach: number | [number, number] = shoulderInfo.type === 'ball' ? shoulderInfo.cone : 0;
+  const facing: [number, number, number] | null = shoulderInfo.type === 'ball' ? shoulderInfo.swing : null;
+  world.setJoint(shoulder, { swing: null, cone: 0.5 });
   world.addJoint({ type: 'distance', a: door, b: frame, min: 0, frequency: 2, dampingRatio: 0.5, collide: true });
   world.addJoint({ type: 'slider', a: door, axis: new Float32Array([1, 0, 0]), motorSpeed: 1, motorForce: 50 });
   world.addJoint({ type: 'fixed', a: door, b: frame });

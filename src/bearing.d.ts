@@ -440,8 +440,10 @@ export interface FixedJointOptions extends JointCommon { type: 'fixed' }
 /** Any turn about its anchor; min and max limit its twist about axis, cone its swing. */
 export interface BallJointOptions extends JointCommon, Turning, TurnDrive {
   type?: 'ball';
-  /** How far axis may swing, radians, 0 to π. Default π, none. */
-  cone?: number;
+  /** How far axis may swing, radians, 0 to π; or [toward swing, across it], an ellipse, each above 0. Default π, none. */
+  cone?: number | readonly [number, number];
+  /** Which way an elliptical cone's first angle faces, world space. Default null: the world axis most square to axis. */
+  swing?: Vec3 | null;
 }
 /** Turns about axis; min and max limit its angle, radians, -π to π. */
 export interface HingeJointOptions extends JointCommon, Driven { type: 'hinge' }
@@ -467,8 +469,10 @@ export interface RotationJointOptions extends JointBase, TurnDrive {
   type: 'rotation';
   /** For cone: world space; needn't be unit length. Default [0, 1, 0]. */
   axis?: Vec3;
-  /** How far axis may swing from where it was, radians, 0 to π, while the motor or friction lets it turn. Default π, none. */
-  cone?: number;
+  /** How far axis may swing from where it was, radians, 0 to π, or [toward swing, across it], while the motor or friction lets it turn. Default π, none. */
+  cone?: number | readonly [number, number];
+  /** Which way an elliptical cone's first angle faces, world space. Default null: the world axis most square to axis. */
+  swing?: Vec3 | null;
 }
 
 export type JointOptions = FixedJointOptions | BallJointOptions | HingeJointOptions | SliderJointOptions | DistanceJointOptions | RotationJointOptions;
@@ -486,7 +490,8 @@ export interface JointChanges {
   min?: number | null;
   max?: number | null;
   length?: number | null;
-  cone?: number;
+  cone?: number | readonly [number, number];
+  swing?: Vec3 | null;
   /** A number for a hinge or slider, a rotation for a ball or rotation joint; null for none. */
   target?: number | Quat | null;
   motorSpeed?: number;
@@ -521,10 +526,10 @@ interface DriveInfo {
 /** What world.jointOf returns: a copy, in the form addJoint takes. min and max are null for their defaults; axis is as last given. */
 export type JointInfo =
   | (JointInfoCommon & { type: 'fixed'; anchorB?: [number, number, number] })
-  | (JointInfoCommon & DriveInfo & { type: 'ball'; anchorB?: [number, number, number]; axis: [number, number, number]; min: number | null; max: number | null; cone: number; target: [number, number, number, number] | null })
+  | (JointInfoCommon & DriveInfo & { type: 'ball'; anchorB?: [number, number, number]; axis: [number, number, number]; min: number | null; max: number | null; cone: number | [number, number]; swing: [number, number, number] | null; target: [number, number, number, number] | null })
   | (JointInfoCommon & DriveInfo & { type: 'hinge' | 'slider'; anchorB?: [number, number, number]; axis: [number, number, number]; min: number | null; max: number | null; target: number | null; motorSpeed: number })
   | (JointInfoCommon & { type: 'distance'; anchorB: [number, number, number]; length: number; min: number | null; max: number | null; frequency: number; dampingRatio: number })
-  | (JointInfoBase & DriveInfo & { type: 'rotation'; axis: [number, number, number]; cone: number; target: [number, number, number, number] | null });
+  | (JointInfoBase & DriveInfo & { type: 'rotation'; axis: [number, number, number]; cone: number | [number, number]; swing: [number, number, number] | null; target: [number, number, number, number] | null });
 
 export interface WorldOptions {
   /** m/s², default [0, -9.81, 0]. */

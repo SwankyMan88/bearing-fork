@@ -106,7 +106,7 @@ test('load refuses what save() didn\'t write, data of another version or format,
   const data = new World().save();
   assert.equal(data.version, VERSION);
   assert.throws(() => World.load({ ...data, version: '9.9.9' }), /^Error: load: this data was saved by Bearing 9\.9\.9, and this is /);
-  assert.throws(() => World.load({ ...data, format: 0 }), /^Error: load: data is format 0; this Bearing reads format 12$/);
+  assert.throws(() => World.load({ ...data, format: 0 }), /^Error: load: data is format 0; this Bearing reads format 13$/);
   const damaged = JSON.parse(JSON.stringify(data));
   damaged.objects[0].f._slots = { r: 999 };
   assert.throws(() => World.load(damaged), /^Error: load: data is damaged: a link to object 999, of \d+$/);
