@@ -46,10 +46,10 @@ import {
   Shape, Manifold, Part, Parts, SPHERE as SPHERE_KIND, CAPSULE as CAPSULE_KIND, BOX as BOX_KIND, HULL as HULL_KIND,
 } from './collide.js';
 import { ray, shapeCast as cast, overlap as overlapping, sense, sweep } from './query.js';
-import { Events, END } from './events.js';
+import { Events, END, IMPACT } from './events.js';
 import { walk, settle, CHARACTER } from './character.js';
 import { lockedInverse } from './contact.js';
-import { cos, quatMultiply, axesOf } from './core/math.js';
+import { cos, sin, atan2, quatMultiply, axesOf } from './core/math.js';
 import { Mesh, Heightfield } from './mesh.js';
 import { save, load } from './save.js';
 import { debugLines } from './debug.js';
@@ -190,7 +190,7 @@ const WORKER = new URL('./worker.js', import.meta.url);
 const BODY_OPTIONS = [
   'type', 'shape', 'size', 'radius', 'height', 'vertices', 'indices', 'heights', 'columns', 'spacing', 'parts',
   'density', 'mass', 'inertia', 'centerOfMass',
-  'friction', 'restitution', 'damping', 'angularDamping', 'gravityScale', 'layers', 'mask', 'sensor',
+  'friction', 'restitution', 'damping', 'angularDamping', 'gravityScale', 'layers', 'mask', 'group', 'sensor',
   'lockRotation', 'maxSlope', 'stepHeight',
   'position', 'rotation', 'velocity', 'angularVelocity',
 ];
@@ -212,7 +212,7 @@ const DEFAULTS = Object.freeze({
   friction: 0.5, restitution: 0, damping: 0, angularDamping: 0, gravityScale: 1,
   // In the first layer, and colliding with all 32: everything collides with
   // everything until told otherwise (rule 110).
-  layers: 1, mask: 0xffffffff, sensor: false, lockRotation: [false, false, false],
+  layers: 1, mask: 0xffffffff, group: 0, sensor: false, lockRotation: [false, false, false],
   // A character walks up ground as steep as friction 1 can hold, 45°: about
   // where walking turns into climbing, and Unity's, Godot's, Rapier's and
   // PhysX's default. Its step height follows its size (see _write).
@@ -254,6 +254,7 @@ const COLUMNS = [
   ['_gravityScale', Float64Array, 1],
   ['_layers', Uint32Array, 1],       // which of 32 layers the body is in, as bits
   ['_mask', Uint32Array, 1],         // which layers it collides with
+  ['_group', Float64Array, 1],       // bodies of one group, but 0, never collide; any safe whole number, so a body's id will do
   ['_invMass', Float64Array, 1],     // 1 / mass for a dynamic body, 0 for anything else
   ['_size', Float64Array, 1],        // the shape's thinnest extent, m: what its tolerances scale with
   ['_reach', Float64Array, 1],       // the farthest any point of the shape is from its centre, m
@@ -326,7 +327,7 @@ export class World {
     this._comGiven = null; this._invInertia = null; this._tumbled = null; this._ceiling = null;
     this._force = null; this._torque = null; this._friction = null; this._restitution = null;
     this._damping = null; this._angularDamping = null; this._gravityScale = null; this._layers = null;
-    this._mask = null; this._invMass = null; this._size = null; this._reach = null; this._axes = null;
+    this._mask = null; this._group = null; this._invMass = null; this._size = null; this._reach = null; this._axes = null;
     this._box = null; this._motion = null; this._invI = null; this._invIt = null; this._start = null;
     this._startQ = null; this._fast = null; this._caught = null; this._type = null; this._shape = null;
     this._massGiven = null; this._inertiaGiven = null; this._forced = null; this._transforms = null;
@@ -689,8 +690,8 @@ export class World {
   }
 
   /**
-   * The last step's contact events: which pairs began touching and which
-   * stopped, as fresh plain objects. Given a body, only its own, each turned
+   * The last step's contact events: which pairs began touching, which met
+   * again while touching, and which stopped, as fresh plain objects. Given a body, only its own, each turned
    * so that `a` is that body. A body removed since still has its events, its
    * handle reading as dead, so a removed body is taken here.
    */
@@ -714,7 +715,7 @@ export class World {
       // Turned round, the normal points the other way; 0 - x keeps a zero from becoming -0.
       const i3 = 3 * i, n = e.normal, k = (x) => (turned ? 0 - x : x);
       out.push({
-        type: 'begin', a: new Body(this, a), b: new Body(this, b),
+        type: e.type[i] === IMPACT ? 'impact' : 'begin', a: new Body(this, a), b: new Body(this, b),
         point: [e.point[i3], e.point[i3 + 1], e.point[i3 + 2]],
         normal: [k(n[i3]), k(n[i3 + 1]), k(n[i3 + 2])],
         speed: e.speed[i],
@@ -1047,9 +1048,9 @@ export class World {
     }
     // Each joint's force over the step, read after it (joints.js, JOINT FORCES).
     if (held > 0) jointForces(this, dt);
+    const g = this._gravity, gravity = Math.sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
     if (touching > 0) {
-      const g = this._gravity;
-      restitution(this, next, Math.sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]));
+      restitution(this, next, gravity);
       store(this, next);
     }
     // The catch's sweeps look for bodies out of their fat boxes where the
@@ -1057,7 +1058,7 @@ export class World {
     // with the same step and epoch that list would be taken for this one.
     this._straysAt = -1;
     this._catch(next);
-    if (touching > 0) touched(this, pairs, next);
+    if (touching > 0) touched(this, pairs, next, gravity);
 
     const p = this._position, q = this._rotation, framed = this._framedCount > 0 ? this._framed : null;
     const frozen = this._frozen;
@@ -1419,8 +1420,16 @@ export class World {
       maxDistance = m;
     }
     const mask = o.mask === undefined ? 0xffffffff : bits(caller, 'mask', o.mask);
-    // Checked as every handle is: one removed, or from another world, is a mistake.
-    const ignore = o.ignore === undefined || o.ignore === null ? -1 : handle(caller, 'ignore', o.ignore, this, Body, this._slots);
+    // Checked as every handle is: one removed, or from another world, is a
+    // mistake. A list, as of a ragdoll's own parts, is searched for each body
+    // a query meets: a dozen compares, against walking a tree.
+    const ignore = [], list = o.ignore;
+    if (Array.isArray(list)) {
+      for (let k = 0; k < list.length; k++) ignore.push(handle(caller, `ignore[${k}]`, list[k], this, Body, this._slots));
+    } else if (list !== undefined && list !== null) {
+      if (!(list instanceof Body)) fail(caller, `ignore must be a Body or a list of Bodies, got ${show(list)}`);
+      ignore.push(handle(caller, 'ignore', list, this, Body, this._slots));
+    }
     const rotation = o.rotation === undefined ? [0, 0, 0, 1] : quat(caller, 'rotation', o.rotation);
     return { maxDistance, mask, ignore, rotation };
   }
@@ -1987,6 +1996,55 @@ export class World {
     if (name !== 'velocity') this._unlocked(s);
   }
 
+  /**
+   * body.moveTo: the velocities that take the body's origin to P, turned Q
+   * (null: as it is), over a step of dt. Its centre of mass goes straight
+   * there, and it turns about a fixed axis, by the angle the substeps' turn
+   * gives (_move: each turns by 2 atan(|ω| h / 2), not |ω| h), so a kinematic
+   * body lands on the pose to rounding however far it turns. Box2D 3's
+   * b2Body_SetTargetTransform and Jolt's MoveKinematic, which leave the turn
+   * short; and worked out here with Bearing's own sine, cosine and arctangent,
+   * where a game doing it itself would reach for Math's and lose the bits.
+   */
+  _moveTo(caller, id, position, rotation, dt) {
+    const s = this._slotOf(caller, id);
+    const P = vec3(caller, 'position', position);
+    const Q = rotation === null || rotation === undefined ? null : quat(caller, 'rotation', rotation);
+    if (typeof dt !== 'number' || !(dt > 0) || dt === Infinity) fail(caller, `dt must be a positive number, got ${show(dt)}`);
+    if (this._type[s] === STATIC) fail(caller, 'a static body has no velocity');
+    const p = this._position, q = this._rotation, s3 = 3 * s, s4 = 4 * s;
+    // Where its centre of mass and principal axes will be: _place7's sums.
+    if (Q === null) {
+      TARGET[0] = q[s4]; TARGET[1] = q[s4 + 1]; TARGET[2] = q[s4 + 2]; TARGET[3] = q[s4 + 3];
+    } else if (this._framed[s] === 0) {
+      TARGET[0] = Q[0]; TARGET[1] = Q[1]; TARGET[2] = Q[2]; TARGET[3] = Q[3];
+    } else {
+      quatMultiply(Q, 0, this._frame, s4, TARGET, 0);
+    }
+    let cx = P[0], cy = P[1], cz = P[2];
+    if (this._framed[s] === 1) {
+      const o = this._offset;
+      rotate(TARGET, 0, o[s3], o[s3 + 1], o[s3 + 2], false, v3);
+      cx += v3[0]; cy += v3[1]; cz += v3[2];
+    }
+    // The turn, the short way round: target ⊗ now⁻¹.
+    INVERSE[0] = -q[s4]; INVERSE[1] = -q[s4 + 1]; INVERSE[2] = -q[s4 + 2]; INVERSE[3] = q[s4 + 3];
+    quatMultiply(TARGET, 0, INVERSE, 0, TARGET, 4);
+    let x = TARGET[4], y = TARGET[5], z = TARGET[6], w = TARGET[7];
+    if (w < 0) { x = -x; y = -y; z = -z; w = -w; }
+    const sine = Math.sqrt(x * x + y * y + z * z), h = dt / this._substeps;
+    let spin = 0;
+    if (sine > 0) {
+      const half = atan2(sine, w) / this._substeps;   // half the turn a substep
+      spin = 2 * sin(half) / (cos(half) * h) / sine;
+    }
+    this._wake(s);
+    const v = this._velocity, a = this._angular;
+    v[s3] = (cx - p[s3]) / dt; v[s3 + 1] = (cy - p[s3 + 1]) / dt; v[s3 + 2] = (cz - p[s3 + 2]) / dt;
+    a[s3] = x * spin; a[s3 + 1] = y * spin; a[s3 + 2] = z * spin;
+    this._unlocked(s);
+  }
+
   // Forces and impulses. Each checks its arguments whatever the body's type,
   // then does nothing to a static or kinematic body: those act as infinitely
   // heavy, so no push moves them, and that is the physics rather than a
@@ -2152,6 +2210,7 @@ export class World {
       gravityScale: this._gravityScale[s],
       layers: this._layers[s],
       mask: this._mask[s],
+      group: this._group[s],
       sensor: this._sensor[s] === 1,
       lockRotation: [(this._lock[s] & 1) !== 0, (this._lock[s] & 2) !== 0, (this._lock[s] & 4) !== 0],
       maxSlope: this._maxSlope[s],
@@ -2266,6 +2325,7 @@ export class World {
     this._gravityScale[s] = spec.gravityScale;
     this._layers[s] = spec.layers;
     this._mask[s] = spec.mask;
+    this._group[s] = spec.group;
     const sensor = spec.sensor ? 1 : 0;
     this._sensorCount += sensor - this._sensor[s];
     this._sensor[s] = sensor;
@@ -2436,6 +2496,11 @@ function resolve(caller, base, given) {
   const gravityScale = has('gravityScale') ? finite(caller, 'gravityScale', given.gravityScale) : base.gravityScale;
   const layers = has('layers') ? bits(caller, 'layers', given.layers) : base.layers;
   const mask = has('mask') ? bits(caller, 'mask', given.mask) : base.mask;
+  let group = base.group;
+  if (has('group')) {
+    group = given.group;
+    if (!Number.isSafeInteger(group) || group < 0) fail(caller, `group must be a whole number, 0 or more, got ${show(group)}`);
+  }
   const sensor = has('sensor') ? flag(caller, 'sensor', given.sensor) : base.sensor;
   let lockRotation = base.lockRotation;
   if (has('lockRotation')) {
@@ -2477,7 +2542,7 @@ function resolve(caller, base, given) {
   }
   return {
     type, shape, size, radius, height, geometry, density, mass, massGiven, inertia, inertiaGiven, centerOfMass,
-    friction, restitution, damping, angularDamping, gravityScale, layers, mask, sensor,
+    friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, sensor,
     lockRotation, maxSlope, stepHeight, stepGiven, position, rotation, velocity, angularVelocity,
   };
 }
@@ -2623,7 +2688,7 @@ function transposed(R) {
 
 const ZERO = Object.freeze([0, 0, 0]), IDENTITY = Object.freeze([0, 0, 0, 1]);
 /** _pose's and _place7's scratch; neither is re-entered. */
-const POSE = new Float64Array(7), INVERSE = new Float64Array(4);
+const POSE = new Float64Array(7), INVERSE = new Float64Array(4), TARGET = new Float64Array(8);
 /** POSE's position and rotation, as views made once: setPosition and setRotation are called every step for a moved platform. */
 const POSE_P = POSE.subarray(0, 3), POSE_Q = POSE.subarray(3, 7);
 /** _catch's: the core it sweeps, what the sweep found, and a rotation; a step isn't re-entered. */
@@ -2638,7 +2703,7 @@ function tallness(spec) {
 const TURN = new Shape(), M6 = new Float64Array(6);
 
 /** The material options, in the order bodyOf lists them. */
-const MATERIAL = ['friction', 'restitution', 'damping', 'angularDamping', 'gravityScale', 'layers', 'mask', 'sensor'];
+const MATERIAL = ['friction', 'restitution', 'damping', 'angularDamping', 'gravityScale', 'layers', 'mask', 'group', 'sensor'];
 
 /** Where _senseAll's pair met; it isn't re-entered. */
 const SENSED = new Manifold();

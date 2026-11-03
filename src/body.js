@@ -124,6 +124,16 @@ export class Body {
   }
 
   /**
+   * Sets the velocities that bring the body's origin to `position`, turned to
+   * `rotation` (null: as it is now), over the next step of `dt` seconds: how an
+   * animated kinematic body is moved, pushing what it meets as it goes.
+   */
+  moveTo(position, rotation, dt) {
+    this.#world._moveTo('moveTo', this.#id, position, rotation, dt);
+    return this;
+  }
+
+  /**
    * A force in N, world space, acting for the next step and then cleared.
    * Off the centre, at `point` (world space, m), it turns the body too.
    */

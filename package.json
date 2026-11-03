@@ -1,6 +1,6 @@
 {
   "name": "bearing-physics",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A physics engine in plain JavaScript, for any renderer. No dependencies, no build step.",
   "license": "MIT",
   "author": "Nolan Baxter",

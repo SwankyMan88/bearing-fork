@@ -488,6 +488,17 @@ These were made with Nolan and override the rules below where they differ.
   `LmnTrtl <294360573+nolanbaxter@users.noreply.github.com>` (set in this repo's git config), and
   every `gh` call runs as the personal account (`GH_TOKEN=$(gh auth token --user NolanLT)`). The
   work account and work email never appear anywhere in this project.
+- **2D units: metres, with Winding's 2D axes** (2026-11-03, Nolan: "do what you'd recommend for
+  the units. Try to match Winding... if it doesn't work, do what will work for Bearing"). Winding's
+  2D unit is a CSS pixel, y down, positive angles clockwise. Bearing would run in pixels (every
+  tolerance is PIXEL of a body's size), but its defaults would not: Earth's gravity in px/s² needs
+  a pixels-per-metre figure nothing fixes, and water's density gives a 32 px box a mass near 1e6.
+  So a 2D world is in metres, kilograms and seconds, with y down and positive angles clockwise,
+  as Winding's 2D view: default gravity `[0, 9.81]`, density 1000 kg/m² (a slab 1 m deep, so a
+  1 m box weighs what Bearing's 1 m cube does), and positions and angles copy into Winding nodes
+  unchanged, with the 2D camera's `zoom` (screen pixels per unit) as pixels per metre. This
+  settles rules 50 and 51. Not started: scoped at about 9.5 milestones and left until a 2D game is
+  planned (all eight in the series are 3D).
 - **`package.json` was `"private": true` until the first release** (0.14.0, 2026-11-02), so a
   stray `npm publish` from the repo was refused; `release.yml` still stops on it if it returns. The name claim in rule 9 is a separate placeholder package that Nolan
   publishes himself (it needs his 2FA), and it is also what npm needs to exist before trusted
@@ -763,7 +774,8 @@ same about itself. The user says what they want simulated, and the package works
 
 48. **3D units are metres, kilograms and seconds,** as in glTF and as in Winding.
 49. **3D is Y-up and right-handed,** as in glTF and Winding.
-50. **2D units match Winding's 2D view:** one unit is a CSS pixel, and y points down. Gravity in
+50. *(Settled 2026-11-03: metres, with y down and clockwise angles; see the decisions at the
+    top.)* **2D units match Winding's 2D view:** one unit is a CSS pixel, and y points down. Gravity in
     2D therefore points toward +y, `[0, 980]` or so. **Get Nolan's decision on this before
     writing the 2D module.** The other choice is metres with y up, then scaled for display. Box2D
     works in metres because its tolerances are tuned for metre-sized objects, and pixel units

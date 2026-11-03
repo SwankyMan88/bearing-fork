@@ -52,7 +52,7 @@ const joined = () => {
 };
 
 const JOINT_OPTIONS = 'type, a, b, anchor, anchorB, axis, min, max, length, cone, target, motorSpeed, motorForce, frictionForce, frequency, dampingRatio, collide';
-const OPTIONS = 'type, shape, size, radius, height, vertices, indices, heights, columns, spacing, parts, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, sensor, lockRotation, maxSlope, stepHeight, position, rotation, velocity, angularVelocity';
+const OPTIONS = 'type, shape, size, radius, height, vertices, indices, heights, columns, spacing, parts, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, sensor, lockRotation, maxSlope, stepHeight, position, rotation, velocity, angularVelocity';
 
 /** The smallest .glb: one node, 'floor', showing one triangle; `json` adds to its JSON. */
 function glb(json = {}) {
@@ -169,6 +169,7 @@ const cases = [
       [e, run({ gravityScale: '1' }), `${call}: gravityScale must be a finite number, got '1'`],
       [e, run({ layers: 2 ** 32 }), `${call}: layers must be a whole number that fits in 32 bits, got 4294967296`],
       [e, run({ mask: 0.5 }), `${call}: mask must be a whole number that fits in 32 bits, got 0.5`],
+      [e, run({ group: -1 }), `${call}: group must be a whole number, 0 or more, got -1`],
       [e, run({ sensor: 1 }), `${call}: sensor must be true or false, got 1`],
       [e, run({ inertia: [1, 0, 1] }), `${call}: inertia must be 3 positive numbers, or null to follow the shape, got 1,0,1`],
       [e, run({ position: { x: 1, y: 2, z: 3 } }), `${call}: position must be 3 finite numbers, got an object`],
@@ -190,8 +191,8 @@ const cases = [
     `load: this data was saved by Bearing 0.13.0, and this is ${VERSION}; a save loads only into the version that made it`],
   ['world-load', () => World.load({ format: 9, objects: [] }),
     `load: this data was saved by a Bearing from before saves were stamped, and this is ${VERSION}; a save loads only into the version that made it`],
-  ['world-load', () => World.load({ ...new World().save(), format: 9 }), 'load: data is format 9; this Bearing reads format 10'],
-  ['world-load', () => World.load({ version: VERSION, format: 10, objects: [{ c: 'Box', f: {} }] }), "load: data is damaged: an object of an unknown kind, 'Box'"],
+  ['world-load', () => World.load({ ...new World().save(), format: 11 }), 'load: data is format 11; this Bearing reads format 12'],
+  ['world-load', () => World.load({ version: VERSION, format: 12, objects: [{ c: 'Box', f: {} }] }), "load: data is damaged: an object of an unknown kind, 'Box'"],
   ['world-debuglines', () => gone().world.debugLines(), 'debugLines: this world was destroyed'],
   ['world-debuglines', () => fresh().world.debugLines(true), 'debugLines: options must be an object, got true'],
   ['world-debuglines', () => fresh().world.debugLines({ shape: true }), "debugLines: unknown option 'shape' (did you mean 'shapes'?)"],
@@ -307,9 +308,12 @@ const cases = [
       [e, run([0, 0, 0], [0, -1, 0], { layers: 1 }), `${call}: unknown option 'layers' (the options are maxDistance, mask, ignore)`],
       [e, run([0, 0, 0], [0, -1, 0], { maxDistance: -1 }), `${call}: maxDistance must be 0 or more, got -1`],
       [e, run([0, 0, 0], [0, -1, 0], { mask: 1.5 }), `${call}: mask must be a whole number that fits in 32 bits, got 1.5`],
-      [e, run([0, 0, 0], [0, -1, 0], { ignore: 7 }), `${call}: ignore must be a Body, got 7`],
+      [e, run([0, 0, 0], [0, -1, 0], { ignore: 7 }), `${call}: ignore must be a Body or a list of Bodies, got 7`],
       [e, () => fresh().world[call]([0, 0, 0], [0, -1, 0], { ignore: fresh().body }), `${call}: ignore belongs to another world`],
       [e, () => { const { world, body } = dead(); world[call]([0, 0, 0], [0, -1, 0], { ignore: body }); }, `${call}: ignore was removed`],
+      [e, () => { const { world, body } = fresh(); world[call]([0, 0, 0], [0, -1, 0], { ignore: [body, 7] }); }, `${call}: ignore[1] must be a Body, got 7`],
+      [e, () => fresh().world[call]([0, 0, 0], [0, -1, 0], { ignore: [fresh().body] }), `${call}: ignore[0] belongs to another world`],
+      [e, () => { const { world, body } = dead(); world[call]([0, 0, 0], [0, -1, 0], { ignore: [body] }); }, `${call}: ignore[0] was removed`],
     ];
   }),
   ...['shapeCast', 'overlap'].flatMap((call) => {
@@ -335,7 +339,12 @@ const cases = [
       [e, run({}, [0, 0, 0], { rotaton: [0, 0, 0, 1] }), `${call}: unknown option 'rotaton' (did you mean 'rotation'?)`],
       [e, run({}, [0, 0, 0], { speed: 1 }), `${call}: unknown option 'speed' (the options are ${cast ? 'maxDistance, ' : ''}mask, ignore, rotation)`],
       [e, run({}, [0, 0, 0], { mask: -1.5 }), `${call}: mask must be a whole number that fits in 32 bits, got -1.5`],
-      [e, run({}, [0, 0, 0], { ignore: {} }), `${call}: ignore must be a Body, got an object`],
+      [e, run({}, [0, 0, 0], { ignore: {} }), `${call}: ignore must be a Body or a list of Bodies, got an object`],
+      [e, run({}, [0, 0, 0], { ignore: [null] }), `${call}: ignore[0] must be a Body, got null`],
+      [e, () => (cast ? fresh().world.shapeCast({}, [0, 0, 0], [0, -1, 0], { ignore: [fresh().body] }) : fresh().world.overlap({}, [0, 0, 0], { ignore: [fresh().body] })),
+        `${call}: ignore[0] belongs to another world`],
+      [e, () => { const { world, body } = dead(); return cast ? world.shapeCast({}, [0, 0, 0], [0, -1, 0], { ignore: [body] }) : world.overlap({}, [0, 0, 0], { ignore: [body] }); },
+        `${call}: ignore[0] was removed`],
       [e, () => (cast ? fresh().world.shapeCast({}, [0, 0, 0], [0, -1, 0], { ignore: fresh().body }) : fresh().world.overlap({}, [0, 0, 0], { ignore: fresh().body })),
         `${call}: ignore belongs to another world`],
       [e, () => { const { world, body } = dead(); return cast ? world.shapeCast({}, [0, 0, 0], [0, -1, 0], { ignore: body }) : world.overlap({}, [0, 0, 0], { ignore: body }); },
@@ -363,7 +372,7 @@ const cases = [
   ]),
 
   ...[['setPosition', [0, 0, 0]], ['setRotation', [[0, 0, 0, 1]]], ['setAxisAngle', [[0, 1, 0], 1]],
-    ['setEuler', [0, 0]], ['setVelocity', [0, 0, 0]], ['setAngularVelocity', [0, 0, 0]],
+    ['setEuler', [0, 0]], ['setVelocity', [0, 0, 0]], ['setAngularVelocity', [0, 0, 0]], ['moveTo', [[0, 0, 0], null, 1]],
     ['applyForce', [[0, 0, 0]]], ['applyTorque', [[0, 0, 0]]], ['applyImpulse', [[0, 0, 0]]],
     ['applyAngularImpulse', [[0, 0, 0]]]].flatMap(([m, args]) => [
     [`body-${m.toLowerCase()}`, () => gone().body[m](...args), `${m}: this world was destroyed`],
@@ -380,6 +389,10 @@ const cases = [
   ['body-centerofmass', () => { fresh().body.centerOfMass = [0, 0, 0]; }, "body.centerOfMass is now body.worldCenterOfMass (world space); the centerOfMass option is in the body's own frame"],
   ['body-setangularvelocity', () => fresh().body.setAngularVelocity(0, Infinity, 0), 'setAngularVelocity: x, y and z must be finite numbers, got 0,Infinity,0'],
   ['body-setangularvelocity', () => new World().addBody({ type: 'static' }).setAngularVelocity(0, 1, 0), 'setAngularVelocity: a static body has no angularVelocity'],
+  ['body-moveto', () => fresh().body.moveTo([0, 1], null, 1), 'moveTo: position must be 3 finite numbers, got 0,1'],
+  ['body-moveto', () => fresh().body.moveTo([0, 1, 0], [0, 0, 0, 0], 1), 'moveTo: rotation must be 4 finite numbers, not all zero, got 0,0,0,0'],
+  ['body-moveto', () => fresh().body.moveTo([0, 1, 0], null, 0), 'moveTo: dt must be a positive number, got 0'],
+  ['body-moveto', () => new World().addBody({ type: 'static' }).moveTo([0, 1, 0], null, 1), 'moveTo: a static body has no velocity'],
   ['body-applyforce', () => fresh().body.applyForce(10), 'applyForce: force must be 3 finite numbers, got 10'],
   ['body-applyforce', () => fresh().body.applyForce([0, 1, 0], [0, 0]), 'applyForce: point must be 3 finite numbers, got 0,0'],
   // Checked even on a body forces don't move, so a bad call is caught wherever it lands.

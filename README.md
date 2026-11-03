@@ -55,7 +55,7 @@ takes, what it returns and what it throws, with an index to look any of them up 
 - **Fast bodies stop.** A 1 cm ball at 500 m/s stops on a 1 cm wall, with nothing to switch on.
 - **Thousands of bodies**: only bodies whose boxes overlap are tested; 32 collision layers, with a
   mask per body, say what collides with what; and a contact that has hardly changed since the last
-  step is kept rather than found again. See [Layers and masks](docs/API.md#layers).
+  step is kept rather than found again. See [Layers, masks and groups](docs/API.md#layers).
 - **Sleeping**: a heap at rest goes to sleep and costs nothing until something disturbs it, which
   wakes it with nothing to call. Part of a heap that has stopped is frozen while the rest of it
   still settles. [`world.moved()`](docs/API.md#world-moved) lists only the bodies a renderer has
@@ -170,7 +170,7 @@ import are the files in this repository.
 
 ```html
 <script type="module">
-  import { World } from 'https://cdn.jsdelivr.net/npm/bearing-physics@1.0.0/src/bearing.js';
+  import { World } from 'https://cdn.jsdelivr.net/npm/bearing-physics@1.1.0/src/bearing.js';
 </script>
 ```
 
@@ -190,8 +190,8 @@ import { World } from 'bearing-physics';
 <script type="importmap">
 {
   "imports": {
-    "bearing-physics": "https://cdn.jsdelivr.net/npm/bearing-physics@1.0.0/src/bearing.js",
-    "bearing-physics/": "https://cdn.jsdelivr.net/npm/bearing-physics@1.0.0/src/"
+    "bearing-physics": "https://cdn.jsdelivr.net/npm/bearing-physics@1.1.0/src/bearing.js",
+    "bearing-physics/": "https://cdn.jsdelivr.net/npm/bearing-physics@1.1.0/src/"
   }
 }
 </script>

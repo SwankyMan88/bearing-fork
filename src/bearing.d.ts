@@ -56,6 +56,8 @@ interface BodyCommon {
   layers?: number;
   /** Which layers it collides with, as bits, default 0xffffffff (all). */
   mask?: number;
+  /** Bodies of the same group never collide with each other; any whole number (a body's id will do), default 0, none. */
+  group?: number;
   /** Reports what overlaps it and pushes nothing, default false. */
   sensor?: boolean;
   /** The world axes it never turns about, x, y and z, default [false, false, false]. */
@@ -227,6 +229,7 @@ interface BodyInfoCommon {
   layers: number;
   /** Unsigned, 0 to 4294967295. */
   mask: number;
+  group: number;
   sensor: boolean;
   lockRotation: [boolean, boolean, boolean];
   /** A character's. */
@@ -308,6 +311,16 @@ export interface BeginEvent {
   speed: number;
 }
 
+/** Two bodies already touching met again in the last step, a begin's fields: where, which way, how fast, m/s. */
+export interface ImpactEvent {
+  type: 'impact';
+  a: Body;
+  b: Body;
+  point: [number, number, number];
+  normal: [number, number, number];
+  speed: number;
+}
+
 /** Two bodies stopped touching in the last step. A removed body's handle reads as dead. */
 export interface EndEvent {
   type: 'end';
@@ -315,7 +328,7 @@ export interface EndEvent {
   b: Body;
 }
 
-export type ContactEvent = BeginEvent | EndEvent;
+export type ContactEvent = BeginEvent | ImpactEvent | EndEvent;
 
 /** What raycast, raycastAll and shapeCast find. */
 export interface Hit {
@@ -334,8 +347,8 @@ export interface RayOptions {
   maxDistance?: number;
   /** Which of the 32 layers to hit, as bits. Default 0xffffffff. */
   mask?: number;
-  /** A body to leave out. */
-  ignore?: Body | null;
+  /** A body to leave out, or a list of them. */
+  ignore?: Body | readonly Body[] | null;
 }
 
 export interface CastOptions extends RayOptions {
@@ -345,7 +358,7 @@ export interface CastOptions extends RayOptions {
 
 export interface OverlapOptions {
   mask?: number;
-  ignore?: Body | null;
+  ignore?: Body | readonly Body[] | null;
   rotation?: Quat;
 }
 
@@ -626,6 +639,8 @@ export class Body {
   setEuler(yaw: number, pitch: number, roll?: number): this;
   setVelocity(x: number, y: number, z: number): this;
   setAngularVelocity(x: number, y: number, z: number): this;
+  /** The velocities that bring its origin to `position`, turned to `rotation` (null: as it is), over the next step of `dt` s. */
+  moveTo(position: Vec3, rotation: Quat | null, dt: number): this;
   /** N, world space, for the next step only. At `point` (world space, m) it turns the body too. */
   applyForce(force: Vec3, point?: Vec3): this;
   /** N·m, world space, for the next step only. */
