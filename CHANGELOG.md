@@ -7,6 +7,15 @@ All notable changes to Bearing are recorded here. The format follows
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-03
+
+Bearing 1.0. The whole API was gone through before it, as Winding's was, so that code written
+against it keeps working through 1.x: a few names were made to mean one thing each (the old ones
+throw, saying what they are called now), what each call gives back was made to round-trip, and
+the API reference now says exactly what 1.x promises and what it doesn't. The determinism hash is
+checked on Bun as well as Node, and CI runs only the tests a change reaches. No simulation results
+changed from 0.14.0.
+
 ### Changed
 
 - **Breaking:** `body.centerOfMass`, where a body's mass is centred in the world, is now
@@ -423,5 +432,6 @@ version may still change it.
   continuous collision doesn't make a sensor see a body that passes through it within a step (it
   said a later version would).
 
-[Unreleased]: https://github.com/getlowarc/bearing/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/getlowarc/bearing/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/getlowarc/bearing/compare/v0.14.0...v1.0.0
 [0.14.0]: https://github.com/getlowarc/bearing/releases/tag/v0.14.0

@@ -1,10 +1,10 @@
 blank_issues_enabled: false
 contact_links:
   - name: API reference
-    url: https://github.com/getlowarc/bearing/blob/develop/docs/API.md
+    url: https://github.com/getlowarc/bearing/blob/main/docs/API.md
     about: Every call, option and setting, with what it throws.
   - name: Roadmap
-    url: https://github.com/getlowarc/bearing/blob/develop/ROADMAP.md
+    url: https://github.com/getlowarc/bearing/blob/main/ROADMAP.md
     about: What Bearing is for, and what is being built now.
   - name: Security issue
     url: https://github.com/getlowarc/bearing/security/advisories/new

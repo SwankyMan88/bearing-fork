@@ -732,7 +732,7 @@ for Three.js, Babylon.js, PlayCanvas, Pixi and Winding, run against stand-ins by
 the links between the docs. `docs/API.md`'s workers entry brought up to milestone 19. Still to do
 at 1.0: the desktop's numbers, and the npm install once the name is claimed.
 
-**21. 1.0 ⬜**
+**21. 1.0 ✅** *(released 2026-11-03)*
 *Concepts:* release engineering; trusted publishing; checking determinism across JavaScript engines.
 Every goal above met and measured; the determinism hash checked on Bun as well as Node in CI;
 1.0.0 released (see [Versions and releases](#versions-and-releases)).
@@ -826,9 +826,8 @@ Each milestone that adds API is a minor version. Fixes between them are patches.
 | 0.12.0 | 15 | Save, load and debug lines. |
 | 0.12.x | 16 | The performance pass and workers: reworks, so patches. A setting for workers would be an addition, and 0.13.0. |
 | 0.13.0 | 17 | Pose motors. |
-| 0.14.0 | 18 | Joint forces. |
 | 0.14.0 | 18, 19, 20 | The first release, 2026-11-02 (Nolan chose to start at the planned number): everything through joint forces, with 19 and 20 in it. |
-| 1.0.0 | 21 | Every goal met and measured. |
+| 1.0.0 | 21 | Released 2026-11-03: the API gone through and made to last, the determinism hash on Bun. |
 
 ### How a release is made
 
@@ -1041,3 +1040,8 @@ Winding's way, copied before the first one:
   claimed `bearing-physics` on npm with a 0.0.0 placeholder and set the trusted publisher. Made
   Winding's way: a `Release 0.14.0` commit on `develop`, a `main` branch made for it, and a pull
   request into `main` whose merge runs `release.yml`.
+- **2026-11-03.** 1.0.0 released, at Nolan's word ("Once done, I am ready for Bearing to go
+  v1.0.0"), after the API batch he approved (`6fe4a5f`). The goals as measured: faster than
+  cannon-es on every scene with workers (on one thread its ragdolls are still 1.04 to 1.15 times
+  faster); 100 active ragdolls in about 6 ms with workers; stacks stand wherever Rapier's and
+  Jolt's do. The desktop's comparison was left for later, at Nolan's word.
