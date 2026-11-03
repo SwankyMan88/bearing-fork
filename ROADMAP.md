@@ -56,7 +56,7 @@ met and measured.
 | Broadphase | Grows with the world, no bounds to set. Collision layers and masks. |
 | Sleeping | Islands; a resting pile sleeps, a touch wakes it. A list of the bodies that moved, so an engine copies only those. |
 | Queries | Raycast (nearest, and all hits), shape cast, overlap test. |
-| Events | Contact begin, stay and end, and sensors (triggers), read after a step as plain data. |
+| Events | Contact begin and end, and sensors (triggers), read after a step as plain data; what touches a body now asked with `touching()` (no stay events). |
 | Gameplay | Character bodies: walk, slide along walls, climb steps and slopes, stand on moving platforms. |
 | Joints | Fixed, ball, hinge, slider, and distance/spring, with limits and motors. Motors that drive toward a target angle, orientation or position, springy, as active ragdolls need; each joint's force read after a step. |
 | CCD | Fast small bodies don't pass through thin walls. |
@@ -737,6 +737,17 @@ at 1.0: the desktop's numbers, and the npm install once the name is claimed.
 Every goal above met and measured; the determinism hash checked on Bun as well as Node in CI;
 1.0.0 released (see [Versions and releases](#versions-and-releases)).
 *Needs Nolan:* the go-ahead for the release.
+*2026-11-02, Nolan:* the desktop's comparison is not needed for 1.0 ("I didn't have the comparisons
+done when I got v1 out there for Winding. I don't need to here either"); it stays on milestone 7
+for whenever it is run. Before 1.0, the whole API is gone through, as Winding's was, so that 1.x
+can last: what would break later is changed now, with Nolan's OK.
+*2026-11-02:* the pre-1.0 API batch Nolan approved, landed on `develop`: `body.centerOfMass` is
+`body.worldCenterOfMass` and a joint's `friction` is `frictionForce` (both old names throw with
+directions); `bodyOf` and `jointOf` give every option a kind has, `null` where it follows a
+default that is worked out, so `setX(h, xOf(h))` changes nothing; `world.joint(id)`; saves stamped
+with the version and loaded only by it; `docs/API.md`'s "What 1.x promises" and Renamed; one set of
+messages for a bad handle, and properties named `world.gravity`, `body.position`, `joint.force` in
+theirs; `ShapeType` for the type `Shape`.
 
 ### After 1.0
 
@@ -788,8 +799,11 @@ plan, not permission.
 | Reworks existing code without changing the API: a fix, a speed-up, a docs correction | `0.x.y` | `1.x.y` (patch) |
 
 Winding did exactly this: 0.2.0 removed five exports and was a minor, while 0.1.1, a correctness
-pass that changed no API, was a patch. A rename keeps the old name working, throwing with
-directions, for one minor version (rule 47).
+pass that changed no API, was a patch. Renames: before 1.0, a renamed option or property throws,
+saying what it is called now. From 1.0, a name renamed in a 1.x version keeps working until 2.0
+(it may warn once) and is listed in `docs/API.md`'s Renamed section; it goes, throwing with
+directions, only in 2.0. What 1.x promises, and what it doesn't, is written out in `docs/API.md`'s
+"What 1.x promises".
 
 ### Planned versions
 
@@ -821,8 +835,9 @@ Each milestone that adds API is a minor version. Fixes between them are patches.
 Winding's way, copied before the first one:
 
 1. On `develop`, one commit titled `Release x.y.z: <theme>` sets the version in `package.json` and
-   moves `## [Unreleased]` in the CHANGELOG under `## [x.y.z] - <date>`, opening with a short
-   plain-English paragraph on what it brings.
+   in `src/save.js`'s `VERSION`, which saves are stamped with (`test/save.test.js` holds the two
+   equal), and moves `## [Unreleased]` in the CHANGELOG under `## [x.y.z] - <date>`, opening with a
+   short plain-English paragraph on what it brings.
 2. A pull request from `develop` into `main`; `main` takes nothing else.
 3. Merging it runs `.github/workflows/release.yml`, which tags `vx.y.z`, writes the GitHub release
    from that CHANGELOG section, and publishes to npm with trusted publishing: no token stored

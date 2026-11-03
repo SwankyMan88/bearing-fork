@@ -43,35 +43,41 @@ export class Body {
    * true while the body is asleep: at rest, and left out of steps until
    * something disturbs it. A static body never is.
    */
-  get asleep() { return this.#world._asleepOf('asleep', this.#id); }
+  get asleep() { return this.#world._asleepOf('body.asleep', this.#id); }
   set asleep(_) { readOnly('body.asleep'); }
 
   /** kg. */
-  get mass() { return this.#world._massOf('mass', this.#id); }
+  get mass() { return this.#world._massOf('body.mass', this.#id); }
   set mass(_) { readOnly('body.mass', "setBody(body, { mass })"); }
 
   /** kg·m² about the body's own x, y and z axes, a frozen copy. */
-  get inertia() { return this.#world._vector('inertia', this.#id, this.#world._inertia, 3); }
+  get inertia() { return this.#world._vector('body.inertia', this.#id, this.#world._inertia, 3); }
   set inertia(_) { readOnly('body.inertia', 'setBody(body, { inertia })'); }
 
   /** m, a frozen copy: the body's origin, where it was placed, whatever its centre of mass. */
-  get position() { return this.#world._poseOf('position', this.#id, false); }
+  get position() { return this.#world._poseOf('body.position', this.#id, false); }
   set position(_) { readOnly('body.position', 'setPosition(x, y, z)'); }
 
   /** A quaternion [x, y, z, w], a frozen copy. */
-  get rotation() { return this.#world._poseOf('rotation', this.#id, true); }
+  get rotation() { return this.#world._poseOf('body.rotation', this.#id, true); }
   set rotation(_) { readOnly('body.rotation', 'setRotation(q)'); }
 
   /** m, in the world, a frozen copy: where its mass is centred, which it turns about. */
-  get centerOfMass() { return this.#world._centerOf('centerOfMass', this.#id); }
-  set centerOfMass(_) { readOnly('body.centerOfMass', 'setBody(body, { centerOfMass })'); }
+  get worldCenterOfMass() { return this.#world._centerOf('body.worldCenterOfMass', this.#id); }
+  set worldCenterOfMass(_) { readOnly('body.worldCenterOfMass', 'setBody(body, { centerOfMass })'); }
+
+  // Renamed before 1.0 (rule 47): the world-space reading is worldCenterOfMass,
+  // as Winding's is node.worldPosition(), so `centerOfMass` means one thing,
+  // the option, in the body's own frame. Reading or assigning it says so.
+  get centerOfMass() { return renamed(); }
+  set centerOfMass(_) { renamed(); }
 
   /** m/s, a frozen copy. */
-  get velocity() { return this.#world._vector('velocity', this.#id, this.#world._velocity, 3); }
+  get velocity() { return this.#world._vector('body.velocity', this.#id, this.#world._velocity, 3); }
   set velocity(_) { readOnly('body.velocity', 'setVelocity(x, y, z)'); }
 
   /** rad/s about each world axis, a frozen copy. */
-  get angularVelocity() { return this.#world._vector('angularVelocity', this.#id, this.#world._angular, 3); }
+  get angularVelocity() { return this.#world._vector('body.angularVelocity', this.#id, this.#world._angular, 3); }
   set angularVelocity(_) { readOnly('body.angularVelocity', 'setAngularVelocity(x, y, z)'); }
 
   setPosition(x, y, z) {
@@ -148,4 +154,8 @@ export class Body {
   destroy() {
     this.#world._remove('destroy', this);
   }
+}
+
+function renamed() {
+  throw new Error("body.centerOfMass is now body.worldCenterOfMass (world space); the centerOfMass option is in the body's own frame");
 }

@@ -7,6 +7,67 @@ All notable changes to Bearing are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `body.centerOfMass`, where a body's mass is centred in the world, is now
+  `body.worldCenterOfMass`, as Winding's is `node.worldPosition()`, so that `centerOfMass` means
+  one thing: the option, in the body's own frame, which keeps its name. Reading or assigning the old
+  property throws, saying so.
+- **Breaking:** a joint's `friction` option is now `frictionForce`, the same N·m or N, paired with
+  `motorForce`; a body's `friction`, a coefficient, keeps its name. Giving a joint `friction`
+  throws, saying so, and `jointOf` gives `frictionForce`.
+- **Breaking:** "not set" reads back one way. `bodyOf` always gives `inertia` (and, but for a
+  character, `centerOfMass`) where the body can have them, and a character's `stepHeight`, as
+  `null` while they follow their worked-out default; `jointOf` always gives `min` and `max` where
+  the joint has them, `null` for the default. `null` is the default wherever the default is worked
+  out or none, as the API reference's Conventions now say once.
+- **Breaking:** the TypeScript type `Shape` is now `ShapeType`, beside `BodyType` and `JointType`.
+  `Vec3` and `Quat` take any array-like of numbers, a plain `number[]` included, as the reference
+  always said; what Bearing gives back is still a tuple.
+- **Breaking:** error messages made one form. A property names itself in all of its errors
+  (`world.gravity: this world was destroyed`, `body.position: this body was removed`,
+  `joint.force: this joint was removed`). A Body or Joint given to any call is checked by one rule
+  with one set of messages: `<name> must be a Body, got …`, `<name> belongs to another world`,
+  `<name> was removed` (`setBody: body was removed`, `addJoint: b belongs to another world`,
+  `remove: handle belongs to another world`). A query shape's own fields are named as its own:
+  `shapeCast: shape: unknown option 'radus' (did you mean 'radius'?)`, `shapeCast: shape.radius
+  must be a positive number, got -1`.
+- A save is stamped with the version of Bearing that made it, and loads only into that version:
+  `load: this data was saved by Bearing 0.14.0, and this is …; a save loads only into the version
+  that made it`. Its format is 10.
+
+### Added
+
+- `world.joint(id)`, a handle for a joint's id, as `world.body(id)` is for a body's.
+- `world.save()` data carries `version`, the Bearing that saved it.
+- The API reference's "What 1.x promises": what code written against it can rely on through 1.x
+  (every call, option, default's meaning, return shape and unit; bad input throwing and changing
+  nothing), and what it can't (simulation bits across versions, measured figures, documented
+  limitations, error wording, new kinds and fields, modules by path, how ids are laid out), and
+  its Renamed section. From 1.0, a name renamed in 1.x keeps working until 2.0.
+- The reference lists every type the package exports.
+
+### Fixed
+
+- `setBody(body, bodyOf(body))` and `setJoint(joint, jointOf(joint))` change nothing, and
+  `addBody(bodyOf(body))` and `addJoint(jointOf(joint))` make copies, with nothing lost to a field
+  left out. `setJoint` takes `a` and `b` given as they are, and an `anchor`, `anchorB` or `axis`
+  given as it already is changes nothing, so a joint given back what `jointOf` read keeps its angle
+  and what it carried, mid-swing.
+- A distance joint's `length: null` goes back to its default, how far apart its ends are now.
+- `jointOf().axis` is the axis as it was given, made unit length, not worked out again from how
+  the bodies have turned, which read it back a rounding off.
+- `raycast`, `raycastAll`, `shapeCast` and `overlap` given a removed body as `ignore` throw, as
+  every other call given a removed body does, rather than ignoring nothing.
+- A hinge given a rotation as its `target` is told its target must be a number, not that it must
+  be from -π to π.
+- The reference: "centre" means one point each time (`setPosition` moves the origin; anchors'
+  defaults, and a force or impulse with no point, are at the centre of mass; `velocity` is the
+  centre of mass's); `bodyOf`'s Returns names every field, a hull's `vertices` and a compound's
+  `parts` included; the Body entry says what still works on a removed body; a distance joint's
+  `min` and `max` default to its `length`; `world.contacts(body?)`; stale lines on joints,
+  contacts and stay events.
+
 ## [0.14.0] - 2026-11-02
 
 The first release. Bearing is a 3D physics engine in plain JavaScript, for any renderer, with no

@@ -21,11 +21,14 @@
 // storage class holds (the broadphase's visitor) is made afresh by its
 // constructor as the object is loaded.
 //
-// FORMAT. The data is tied to the layout of the world's fields, which changes
-// between versions of Bearing: FORMAT says which layout, and data of another
-// throws rather than loading something subtly wrong. Bump it whenever a
-// stored field is added, removed or changes meaning; test/save.test.js holds
-// the world's field names to a list, so a change can't go unnoticed.
+// VERSION AND FORMAT. The data is tied to the layout of the world's fields,
+// and to what the step does with them, both of which change between versions
+// of Bearing. So data carries the version that saved it, and loads only into
+// that version: anything else throws, rather than loading something subtly
+// wrong or stepping differently from the world it was saved from. Within one
+// version, on develop, FORMAT says which layout: bump it whenever a stored
+// field is added, removed or changes meaning; test/save.test.js holds the
+// world's field names to a list, so a change can't go unnoticed.
 
 import { fail, show } from './core/check.js';
 import { Slots } from './core/slots.js';
@@ -59,8 +62,16 @@ import { COLOURS, DIGITS } from './graph.js';
  * World._drives): data of format 7 has neither. 9 since joints keep the force
  * and torque they held over their last step (joints.js, the force and torque
  * columns), which a sleeping joint still reports: data of format 8 has none.
+ * 10 since a joint keeps its axis as given (joints.js, the axis column), which
+ * jointOf reads back: data of format 9 has none.
  */
-export const FORMAT = 9;
+export const FORMAT = 10;
+
+/**
+ * The version of Bearing this is, stamped into every save: package.json's,
+ * which test/save.test.js holds it to, so a release can't change one alone.
+ */
+export const VERSION = '0.14.0';
 
 /** The classes a world holds, by the name their objects are written under. */
 const CLASSES = { Slots, Broadphase, Tree, Pairs, Memory, Contacts, Joints, Forest, Events, Mesh, Heightfield, Hull, Parts, Part };
@@ -120,7 +131,7 @@ export function save(world, World) {
     return { r: ref(v) };
   };
   ref(world);
-  return { format: FORMAT, objects };
+  return { version: VERSION, format: FORMAT, objects };
 }
 
 /** A number as JSON can hold it, in a list of numbers: special ones as strings. */
@@ -138,6 +149,10 @@ function className(o) {
 export function load(data, World) {
   if (data === null || typeof data !== 'object' || !('format' in data) || !Array.isArray(data.objects)) {
     fail('load', `data must be what world.save() returned, got ${show(data)}`);
+  }
+  if (data.version !== VERSION) {
+    const by = typeof data.version === 'string' ? `Bearing ${data.version}` : 'a Bearing from before saves were stamped';
+    fail('load', `this data was saved by ${by}, and this is ${VERSION}; a save loads only into the version that made it`);
   }
   if (data.format !== FORMAT) fail('load', `data is format ${show(data.format)}; this Bearing reads format ${FORMAT}`);
   const table = data.objects;

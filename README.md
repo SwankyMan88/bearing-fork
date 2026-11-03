@@ -248,7 +248,9 @@ PlayCanvas, Pixi and Winding.
 ## Limitations
 
 - **Before 1.0.** The API can still change in a minor version (0.x.0); each change is in the
-  [CHANGELOG](CHANGELOG.md).
+  [CHANGELOG](CHANGELOG.md), and renamed names in the API reference's
+  [Renamed](docs/API.md#renamed). What 1.x will promise is in
+  [What 1.x promises](docs/API.md#promises).
 - **3D only.** There is no 2D module yet. Bodies locked to turn only in one plane, with
   [`lockRotation`](docs/API.md#world-addbody), stay in it to the bit, but they still cost what 3D
   bodies cost.
@@ -268,8 +270,8 @@ PlayCanvas, Pixi and Winding.
 - **A sensor doesn't see a body that passes all the way through it within one step**: sensors are
   checked where a step leaves bodies.
 - **Saved data belongs to its version.** [`world.save()`](docs/API.md#world-save) follows Bearing's
-  own layout, so data from another version may not load, and it is large: a settled heap of 1,000
-  boxes is about 7 MB of JSON.
+  own layout, so it is stamped with the version that saved it and loads only into that version,
+  and it is large: a settled heap of 1,000 boxes is about 7 MB of JSON.
 
 ## Demo
 

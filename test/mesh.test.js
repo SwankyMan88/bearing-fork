@@ -982,5 +982,5 @@ test('errors name the mesh option at fault, and where in a long list', () => {
   const box = world.addBody({});
   assert.equal(thrown(() => world.setBody(box, { shape: 'mesh' })), "setBody: type must be 'static' or 'kinematic' for a mesh, got 'dynamic'");
   assert.equal(thrown(() => world.shapeCast({ shape: 'mesh' }, [0, 0, 0], [1, 0, 0])),
-    "shapeCast: shape must be 'box', 'sphere' or 'capsule', got 'mesh'");
+    "shapeCast: shape.shape must be 'box', 'sphere' or 'capsule', got 'mesh'");
 });

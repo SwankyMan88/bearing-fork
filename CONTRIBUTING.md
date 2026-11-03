@@ -9,8 +9,9 @@ built now.
 
 - **`develop`** is where work lands. Branch from it, and open pull requests against it.
 - **`main`** is released code only. A release is a pull request from `develop` into `main` that
-  moves the changelog's `[Unreleased]` section under a version and bumps `package.json`; merging
-  it tags the release and publishes it to npm. Nothing else reaches `main`.
+  moves the changelog's `[Unreleased]` section under a version and bumps `package.json` and
+  `src/save.js`'s `VERSION` together (a test holds them equal); merging it tags the release and
+  publishes it to npm. Nothing else reaches `main`.
 
 ## Running the tests
 
@@ -51,11 +52,15 @@ then open <http://localhost:8080/demo/> in a browser with WebGPU.
 Bearing follows [semantic versioning](https://semver.org) against `docs/API.md`:
 
 - **patch** (`x.y.Z`): reworks of existing code that change no API: fixes, speed, docs;
-- **minor** (`x.Y.0`): additions, and renames that keep the old name working for a version;
+- **minor** (`x.Y.0`): additions, and renames that keep the old name working;
 - **major** (`X.0.0`): anything that breaks code written against the API reference.
 
 Before 1.0, breaking changes and additions both go in a minor version (`0.Y.0`), and patches stay
-patches.
+patches; a renamed option or property throws, saying what it is called now. From 1.0, a name
+renamed in a 1.x version keeps working until 2.0 (it may warn the first time it is used) and is
+listed in the API reference's [Renamed](docs/API.md#renamed) section; only 2.0 takes it away.
+What 1.x promises, and what it leaves free to change (simulation bits, measured figures, error
+wording, new kinds and fields), is in [What 1.x promises](docs/API.md#promises).
 
 ## The rules
 

@@ -51,6 +51,13 @@ test('every public method and getter has an entry', () => {
   assert.deepEqual(missing, [], `no entry for: ${missing.join(', ')}`);
 });
 
+test('every type the package exports is named in the reference', () => {
+  const types = readFileSync(new URL('../src/bearing.d.ts', import.meta.url), 'utf8');
+  const names = [...types.matchAll(/^export (?:type|interface) (\w+)/gm)].map((m) => m[1]);
+  const missing = names.filter((name) => !API.includes(`\`${name}\``));
+  assert.deepEqual(missing, [], `not named in docs/API.md: ${missing.join(', ')}`);
+});
+
 test('every entry is for something that exists', () => {
   const entries = [...API.matchAll(/<a id="((?:world|body|joint)-[^"]+|world|readglb)"><\/a>\s*\n###/g)].map((m) => m[1]);
   const stale = entries.filter((id) => !expected.includes(id));

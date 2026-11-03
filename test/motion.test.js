@@ -74,7 +74,7 @@ test('inertia follows the shape and mass, unless given; null follows the shape a
   assert.deepEqual(world.bodyOf(body).inertia, [1, 2, 3]);
   world.setBody(body, { inertia: null, size: [2, 2, 2], density: 1000 });
   assert.deepEqual(body.inertia, solid);
-  assert.equal(world.bodyOf(body).inertia, undefined);
+  assert.equal(world.bodyOf(body).inertia, null);
   const twin = world.addBody({ ...world.bodyOf(world.addBody({ inertia: [4, 5, 6] })) });
   assert.deepEqual(twin.inertia, [4, 5, 6]);
 });

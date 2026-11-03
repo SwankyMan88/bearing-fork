@@ -3,7 +3,7 @@
 // Each @ts-expect-error is a mistake the types must refuse; tsc fails if one is let through.
 
 import { World, Body, Joint, readGlb } from '../src/bearing.js';
-import type { BodyOptions, BodyInfo, JointOptions, JointInfo, Vec3 } from '../src/bearing.js';
+import type { BodyOptions, BodyInfo, JointOptions, JointInfo, Vec3, ShapeType, SavedWorld } from '../src/bearing.js';
 
 export function examples(): void {
   const world = new World();
@@ -47,7 +47,17 @@ export function examples(): void {
   world.setBody(crate, { shape: 'sphere', radius: 1 });
   const info: BodyInfo = world.bodyOf(crate);
   const twin = world.addBody(world.bodyOf(crate));
+  world.setBody(crate, world.bodyOf(crate));
   if (info.shape === 'box') info.size[0].toFixed();
+  const given: [number, number, number] | null = info.shape === 'box' ? info.inertia : null;
+  const kind: ShapeType = info.shape;
+  void [given, kind];
+  // Plain number[] and any array-like are taken wherever a vector is.
+  const numbers: number[] = [0, 1, 0];
+  world.addBody({ position: numbers, velocity: new Float64Array(3) }).setRotation(numbers.concat(1));
+  const centre: readonly [number, number, number] = crate.worldCenterOfMass;
+  const saved: SavedWorld = world.save();
+  void [centre, saved.version];
 
   const t: Float32Array = world.transforms;
   const p: Float32Array = world.previous;
@@ -105,6 +115,9 @@ export function mistakes(world: World, body: Body): void {
   body.inertia = [1, 1, 1];
   // @ts-expect-error transforms are read only
   world.transforms = new Float32Array(0);
+  // @ts-expect-error renamed: body.worldCenterOfMass
+  const [cx]: number[] = body.centerOfMass;
+  void cx;
   const options: BodyOptions = { shape: 'capsule', height: 2 };
   void options;
 }
@@ -174,7 +187,7 @@ export function joints(): void {
   const door = world.addBody({ size: [1, 2, 0.05], position: [0.5, 1, 0], mass: 20 });
   const hinge: Joint = world.addJoint({ type: 'hinge', a: door, b: frame, anchor: [0, 1, 0], axis: [0, 1, 0], min: 0, max: Math.PI / 2 });
   world.addJoint({ a: door, anchor: [0, 5, 0] });
-  world.addJoint({ type: 'ball', a: door, b: null, axis: [0, -1, 0], cone: 0.5, min: -0.3, friction: 2 });
+  world.addJoint({ type: 'ball', a: door, b: null, axis: [0, -1, 0], cone: 0.5, min: -0.3, frictionForce: 2 });
   world.addJoint({ type: 'distance', a: door, b: frame, min: 0, frequency: 2, dampingRatio: 0.5, collide: true });
   world.addJoint({ type: 'slider', a: door, axis: new Float32Array([1, 0, 0]), motorSpeed: 1, motorForce: 50 });
   world.addJoint({ type: 'fixed', a: door, b: frame });
@@ -183,8 +196,12 @@ export function joints(): void {
   const [fx, fy, fz]: readonly [number, number, number] = hinge.force;
   const twist: number = hinge.torque[2] + fx + fy + fz;
   if (info.type === 'distance') info.length.toFixed();
-  if (info.type === 'ball') info.friction.toFixed();
-  world.setJoint(hinge, { friction: 1 });
+  if (info.type === 'ball') info.frictionForce.toFixed();
+  if (info.type === 'hinge') { const least: number | null = info.min; void least; }
+  world.setJoint(hinge, { frictionForce: 1 });
+  world.setJoint(hinge, world.jointOf(hinge));
+  const again: Joint = world.joint(hinge.id);
+  void again;
   const copy: Joint = world.addJoint(world.jointOf(hinge));
   const count: number = world.jointCount;
   const same: boolean = hinge.alive && hinge.id === copy.id && hinge.world === world;
@@ -201,7 +218,10 @@ export function joints(): void {
   world.addJoint({ type: 'slider', a: door, target: -0.2, motorSpeed: 0.1, motorForce: 50 });
   world.addJoint({ a: door, target: [0, 0, 0.38, 0.92], motorForce: 40, frequency: 3 });
   const upright: Joint = world.addJoint({ type: 'rotation', a: door, target: new Float64Array([0, 0, 0, 1]), motorForce: 800, cone: 0.4, axis: [0, 1, 0] });
-  world.addJoint({ type: 'rotation', a: door, b: frame, friction: 3 });
+  world.addJoint({ type: 'rotation', a: door, b: frame, frictionForce: 3 });
+  world.setJoint(world.addJoint({ type: 'distance', a: door, b: frame }), { length: null });
+  // @ts-expect-error renamed: a joint's friction is frictionForce
+  world.addJoint({ type: 'hinge', a: door, friction: 1 });
   world.setJoint(upright, { target: null, motorForce: 0 });
   const turn = world.jointOf(upright);
   if (turn.type === 'rotation') { const t: [number, number, number, number] | null = turn.target; const f: number = turn.frequency; }
@@ -213,8 +233,10 @@ export function joints(): void {
   world.addJoint({ type: 'hinge', a: door, target: [0, 0, 0, 1] });
   // @ts-expect-error a joint holds a body: a is required
   world.addJoint({ type: 'ball' });
-  // @ts-expect-error a and b are set when it is made
-  world.setJoint(hinge, { a: door });
+  // a and b can be given as they are, as jointOf gives them; another body throws when called.
+  world.setJoint(hinge, { a: door, b: frame });
+  // @ts-expect-error a is a body
+  world.setJoint(hinge, { a: 5 });
   // @ts-expect-error not a joint type
   world.addJoint({ type: 'weld', a: door });
   // @ts-expect-error a fixed joint has nothing to limit

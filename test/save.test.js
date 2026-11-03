@@ -3,7 +3,9 @@
 // Run: node test/save.test.js
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { World, Body } from '../src/bearing.js';
+import { VERSION } from '../src/save.js';
 import { suite, test } from './test.js';
 import { mixed } from './scenes.js';
 
@@ -70,6 +72,12 @@ test('a loaded world is its own: changing either leaves the other be, and it can
   world.step(DT);
 });
 
+test('saves are stamped with package.json\'s version, so a release can\'t change one alone', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(VERSION, pkg.version);
+  assert.equal(new World().save().version, pkg.version);
+});
+
 test('the save holds every field of the world: a new one must change FORMAT and this list', () => {
   // A field added to World is saved without a word, but data saved before it
   // would load without it: save.js's FORMAT must change with the list.
@@ -92,11 +100,13 @@ test('the save holds every field of the world: a new one must change FORMAT and 
   ]);
 });
 
-test('load refuses what save() didn\'t write, data of another format, and damaged data', () => {
+test('load refuses what save() didn\'t write, data of another version or format, and damaged data', () => {
   assert.throws(() => World.load(null), /^Error: load: data must be what world.save\(\) returned, got null$/);
   assert.throws(() => World.load({ bodies: [] }), /^Error: load: data must be what world.save\(\) returned, got an object$/);
   const data = new World().save();
-  assert.throws(() => World.load({ ...data, format: 0 }), /^Error: load: data is format 0; this Bearing reads format 9$/);
+  assert.equal(data.version, VERSION);
+  assert.throws(() => World.load({ ...data, version: '9.9.9' }), /^Error: load: this data was saved by Bearing 9\.9\.9, and this is /);
+  assert.throws(() => World.load({ ...data, format: 0 }), /^Error: load: data is format 0; this Bearing reads format 10$/);
   const damaged = JSON.parse(JSON.stringify(data));
   damaged.objects[0].f._slots = { r: 999 };
   assert.throws(() => World.load(damaged), /^Error: load: data is damaged: a link to object 999, of \d+$/);

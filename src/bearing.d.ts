@@ -2,17 +2,22 @@
 // from it. docs/API.md is the reference; these follow it, and test/types.ts
 // holds them to its examples.
 
-/** Three numbers: a plain array, or a typed array of length 3. */
-export type Vec3 = readonly [number, number, number] | Float32Array | Float64Array;
-/** A quaternion [x, y, z, w]: a plain array, or a typed array of length 4. */
-export type Quat = readonly [number, number, number, number] | Float32Array | Float64Array;
+/**
+ * Three numbers, [x, y, z], as Bearing takes them: a plain array, a number[], a typed array, or
+ * any array-like of length 3. The length is checked when called. What Bearing gives back is a
+ * plain [number, number, number].
+ */
+export type Vec3 = ArrayLike<number>;
+/** A quaternion [x, y, z, w], as Bearing takes it: any array-like of length 4, checked when called. */
+export type Quat = ArrayLike<number>;
 
 /**
  * 'dynamic' is moved by gravity; 'static' never moves unless moved; 'kinematic' moves at its
  * velocity; 'character' moves at its velocity as far as the world lets it, walking.
  */
 export type BodyType = 'dynamic' | 'static' | 'kinematic' | 'character';
-export type Shape = 'box' | 'sphere' | 'capsule' | 'hull' | 'compound' | 'mesh' | 'heightfield';
+/** A body's shape. Named ShapeType, as BodyType and JointType are; QueryShape is a query's whole shape. */
+export type ShapeType = 'box' | 'sphere' | 'capsule' | 'hull' | 'compound' | 'mesh' | 'heightfield';
 /** A list of numbers: a plain array or any typed array. */
 export type Numbers = ArrayLike<number>;
 
@@ -191,7 +196,7 @@ export type BodyOptions = BoxOptions | SphereOptions | CapsuleOptions | HullOpti
 
 /** What world.setBody takes: any of addBody's options. Which sizes fit is checked against the body's shape when called. */
 export interface BodyChanges extends BodyCommon {
-  shape?: Shape;
+  shape?: ShapeType;
   size?: Vec3;
   radius?: number;
   height?: number;
@@ -209,10 +214,10 @@ interface BodyInfoCommon {
   mass?: number;
   /** Present if the body was not given a mass. */
   density?: number;
-  /** Present if the body was given an inertia. */
-  inertia?: [number, number, number];
-  /** Present if the body was given a centre of mass. */
-  centerOfMass?: [number, number, number];
+  /** As given, or null while it is worked out from the shape and mass. */
+  inertia: [number, number, number] | null;
+  /** As given, in the body's own frame, or null while it is the shape's. Absent for a character. */
+  centerOfMass?: [number, number, number] | null;
   friction: number;
   restitution: number;
   damping: number;
@@ -226,8 +231,8 @@ interface BodyInfoCommon {
   lockRotation: [boolean, boolean, boolean];
   /** A character's. */
   maxSlope?: number;
-  /** A character's, if it was given one. */
-  stepHeight?: number;
+  /** A character's: as given, or null while it follows its size. */
+  stepHeight?: number | null;
   position: [number, number, number];
   rotation: [number, number, number, number];
   /** Absent for a static body. */
@@ -265,8 +270,10 @@ export type PartInfo = {
   | { shape: 'hull'; vertices: number[] }
 );
 
-/** What world.save() returns: plain data, its layout Bearing's own, named by `format`. */
+/** What world.save() returns: plain data, its layout Bearing's own. It loads only into the version that saved it. */
 export interface SavedWorld {
+  /** The version of Bearing that saved it. */
+  version: string;
   format: number;
   objects: unknown[];
 }
@@ -386,10 +393,12 @@ interface Drive {
   motorForce?: number;
   /** Hz: how stiff the drive to target is. Default 0, as stiff as the solver goes. */
   frequency?: number;
-  /** 1, the default, settles without overshooting; 0 has no damping of its own. */
+  /** 1, the default, settles without overshooting; 0 has no damping of its own, though a spring solved in steps still loses some (about 8% a second at 1 Hz). */
   dampingRatio?: number;
-  /** The most the joint resists a turning (sliding) against b while the motor is off: N·m, or N. Default 0, none. */
-  friction?: number;
+  /** The most the joint resists a turning (sliding) against b while the motor is off: N·m, or N. Default 0, none. Was `friction`. */
+  frictionForce?: number;
+  /** Renamed frictionForce: giving it throws. A body's friction keeps its name. */
+  friction?: never;
 }
 
 /** A ball or rotation joint's: a's turn against b, about b's own axes (the world's with no b), [x, y, z, w], any length; [0, 0, 0, 1] is as joined. null, the default, is none. */
@@ -428,15 +437,15 @@ export interface SliderJointOptions extends JointCommon, Driven { type: 'slider'
 /** Keeps its anchors length apart, or between min and max; a spring with a frequency. */
 export interface DistanceJointOptions extends JointCommon {
   type: 'distance';
-  /** m. Default: how far apart the anchors are. */
-  length?: number;
+  /** m. Default: how far apart the anchors are; null goes back to that. */
+  length?: number | null;
   /** m; default length, or 0 with a spring. null goes back to that. */
   min?: number | null;
   /** m; default length, or none with a spring. */
   max?: number | null;
   /** Hz: makes it a spring pulling to length. Default 0, none. */
   frequency?: number;
-  /** 1, the default, settles without overshooting; 0 bounces for ever. */
+  /** 1, the default, settles without overshooting; 0 has no damping of its own, though a spring solved in steps still loses some (about 8% a second at 1 Hz). */
   dampingRatio?: number;
 }
 
@@ -451,21 +460,27 @@ export interface RotationJointOptions extends JointBase, TurnDrive {
 
 export type JointOptions = FixedJointOptions | BallJointOptions | HingeJointOptions | SliderJointOptions | DistanceJointOptions | RotationJointOptions;
 
-/** What world.setJoint takes: any of addJoint's options but a and b. Which fit is checked against the joint's type when called. */
+/** What world.setJoint takes: any of addJoint's options. a and b can't change, but may be given as they are. Which fit is checked against the joint's type when called. */
 export interface JointChanges {
   type?: JointType;
+  /** As it is: a joint's bodies can't change. */
+  a?: Body;
+  /** As it is: a joint's bodies can't change. */
+  b?: Body | null;
   anchor?: Vec3;
   anchorB?: Vec3;
   axis?: Vec3;
   min?: number | null;
   max?: number | null;
-  length?: number;
+  length?: number | null;
   cone?: number;
   /** A number for a hinge or slider, a rotation for a ball or rotation joint; null for none. */
   target?: number | Quat | null;
   motorSpeed?: number;
   motorForce?: number;
-  friction?: number;
+  frictionForce?: number;
+  /** Renamed frictionForce: giving it throws. */
+  friction?: never;
   frequency?: number;
   dampingRatio?: number;
   collide?: boolean;
@@ -485,17 +500,17 @@ interface JointInfoCommon extends JointInfoBase {
 /** A drive's settings, as jointOf gives them. */
 interface DriveInfo {
   motorForce: number;
-  friction: number;
+  frictionForce: number;
   frequency: number;
   dampingRatio: number;
 }
 
-/** What world.jointOf returns: a copy, in the form addJoint takes. min and max only if given. */
+/** What world.jointOf returns: a copy, in the form addJoint takes. min and max are null for their defaults; axis is as last given. */
 export type JointInfo =
   | (JointInfoCommon & { type: 'fixed'; anchorB?: [number, number, number] })
-  | (JointInfoCommon & DriveInfo & { type: 'ball'; anchorB?: [number, number, number]; axis: [number, number, number]; min?: number; max?: number; cone: number; target: [number, number, number, number] | null })
-  | (JointInfoCommon & DriveInfo & { type: 'hinge' | 'slider'; anchorB?: [number, number, number]; axis: [number, number, number]; min?: number; max?: number; target: number | null; motorSpeed: number })
-  | (JointInfoCommon & { type: 'distance'; anchorB: [number, number, number]; length: number; min?: number; max?: number; frequency: number; dampingRatio: number })
+  | (JointInfoCommon & DriveInfo & { type: 'ball'; anchorB?: [number, number, number]; axis: [number, number, number]; min: number | null; max: number | null; cone: number; target: [number, number, number, number] | null })
+  | (JointInfoCommon & DriveInfo & { type: 'hinge' | 'slider'; anchorB?: [number, number, number]; axis: [number, number, number]; min: number | null; max: number | null; target: number | null; motorSpeed: number })
+  | (JointInfoCommon & { type: 'distance'; anchorB: [number, number, number]; length: number; min: number | null; max: number | null; frequency: number; dampingRatio: number })
   | (JointInfoBase & DriveInfo & { type: 'rotation'; axis: [number, number, number]; cone: number; target: [number, number, number, number] | null });
 
 export interface WorldOptions {
@@ -561,8 +576,10 @@ export class World {
   touching(body: Body): Body[];
   /** What a character stands on, as of the last step; null in the air, or for any other body. */
   groundOf(body: Body): Ground | null;
-  /** A handle for an id. Doesn't check the body is alive. */
+  /** A handle for a body's id. Doesn't check the body is alive. */
   body(id: number): Body;
+  /** A handle for a joint's id. Doesn't check the joint is alive. Joints count their ids apart from bodies'. */
+  joint(id: number): Joint;
   /** Moves the world on by dt seconds, exactly. */
   step(dt: number): void;
   /** The whole world as plain, JSON-safe data, for World.load. */
@@ -581,7 +598,7 @@ export class Body {
   readonly world: World;
   /** Unique to this body for the life of its world; safe to store and send. */
   readonly id: number;
-  /** Where its numbers are in world.transforms: at slot * 7. Reused after the body is removed. */
+  /** Where its numbers are in world.transforms: at slot * 7. Still readable once the body is removed, when it may be another body's. */
   readonly slot: number;
   /** false once removed, or once its world is destroyed. */
   readonly alive: boolean;
@@ -593,11 +610,11 @@ export class Body {
   readonly inertia: readonly [number, number, number];
   /** m, a frozen copy: its origin, where it was placed, whatever its centre of mass. */
   readonly position: readonly [number, number, number];
-  /** m, in the world, a frozen copy: where its mass is centred, which it turns about. */
-  readonly centerOfMass: readonly [number, number, number];
+  /** m, in the world, a frozen copy: where its mass is centred, which it turns about, and what its velocity is the velocity of. Was `centerOfMass`, which now throws; the centerOfMass option, in the body's own frame, keeps its name. */
+  readonly worldCenterOfMass: readonly [number, number, number];
   /** Quaternion [x, y, z, w], a frozen copy. */
   readonly rotation: readonly [number, number, number, number];
-  /** m/s, a frozen copy. */
+  /** m/s, a frozen copy: how fast its centre of mass moves. */
   readonly velocity: readonly [number, number, number];
   /** rad/s about each world axis, a frozen copy. */
   readonly angularVelocity: readonly [number, number, number];
