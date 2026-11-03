@@ -14,6 +14,16 @@ All notable changes to Bearing are recorded here. The format follows
   swings further forward than up. Its edge is a rim the axis slides round, as a frictionless one
   would. `swing` defaults to the world's x, y or z most at right angles to `axis`. One angle is
   the round cone as before, to the bit. The save format is 13.
+- **Characters can push.** Body option `pushForce`, characters only: the most a character pushes a
+  dynamic body it walks into with, in newtons, so a player shoves a crate along as Jolt's
+  characters do. It still stops at the crate each step, as at a wall, and follows as it gives way.
+  The default, 0, pushes nothing, as before. The save format is 14.
+
+### Changed
+
+- `world.step`'s notes say that the first steps to meet something new run slower while the
+  JavaScript engine compiles them (31 ms against 3.5 ms for a ball hitting a jointed wall), and to
+  step a small scene while a game loads.
 
 ## [1.1.0] - 2026-11-03
 

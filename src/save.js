@@ -68,9 +68,10 @@ import { COLOURS, DIGITS } from './graph.js';
  * events are measured from: data of format 10 has none. 12 since a body
  * has a group (World._group): data of format 11 has none. 13 since a cone
  * may be an ellipse (joints.js, the cone2, swing and facing columns): data of
- * format 12 has none.
+ * format 12 has none. 14 since a character may push (World._pushForce):
+ * data of format 13 has none.
  */
-export const FORMAT = 13;
+export const FORMAT = 14;
 
 /**
  * The version of Bearing this is, stamped into every save: package.json's,

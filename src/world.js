@@ -57,7 +57,7 @@ import { debugLines } from './debug.js';
 const TYPES = ['dynamic', 'static', 'kinematic', 'character'];
 const DYNAMIC = 0, STATIC = 1, KINEMATIC = 2;   // and CHARACTER, 3, from character.js
 /** Options only a character has. */
-const WALKING = ['maxSlope', 'stepHeight'];
+const WALKING = ['maxSlope', 'stepHeight', 'pushForce'];
 
 const SHAPES = ['box', 'sphere', 'capsule', 'hull', 'compound', 'mesh', 'heightfield'];
 const BOX = 0, SPHERE = 1, CAPSULE = 2, HULL = 3, COMPOUND = 4, MESH = 5;   // a heightfield is 6: shape >= MESH is level geometry
@@ -191,7 +191,7 @@ const BODY_OPTIONS = [
   'type', 'shape', 'size', 'radius', 'height', 'vertices', 'indices', 'heights', 'columns', 'spacing', 'parts',
   'density', 'mass', 'inertia', 'centerOfMass',
   'friction', 'restitution', 'damping', 'angularDamping', 'gravityScale', 'layers', 'mask', 'group', 'sensor',
-  'lockRotation', 'maxSlope', 'stepHeight',
+  'lockRotation', 'maxSlope', 'stepHeight', 'pushForce',
   'position', 'rotation', 'velocity', 'angularVelocity',
 ];
 
@@ -217,6 +217,8 @@ const DEFAULTS = Object.freeze({
   // where walking turns into climbing, and Unity's, Godot's, Rapier's and
   // PhysX's default. Its step height follows its size (see _write).
   maxSlope: Math.PI / 4, stepHeight: 0, stepGiven: false,
+  // Pushing nothing, as characters did before there was a choice (1.1).
+  pushForce: 0,
   position: [0, 0, 0], rotation: [0, 0, 0, 1], velocity: [0, 0, 0], angularVelocity: [0, 0, 0],
 });
 
@@ -296,6 +298,7 @@ const COLUMNS = [
   // Characters (character.js):
   ['_maxSlope', Float64Array, 1],
   ['_slopeCos', Float64Array, 1],    // cos(maxSlope): ground whose normal is this near up is walkable
+  ['_pushForce', Float64Array, 1],   // the most a character pushes a dynamic body it walks into with, N
   ['_stepHeight', Float64Array, 1],
   ['_stepGiven', Uint8Array, 1],
   ['_ground', Float64Array, 1],      // the id of what it stands on, or -1
@@ -336,7 +339,7 @@ export class World {
     this._parent = null; this._least = null; this._slept = null; this._frozen = null; this._calm = null;
     this._staticMoved = null;
     this._sensor = null; this._lock = null; this._colours = null; this._maxSlope = null;
-    this._slopeCos = null; this._stepHeight = null; this._stepGiven = null; this._ground = null;
+    this._slopeCos = null; this._pushForce = null; this._stepHeight = null; this._stepGiven = null; this._ground = null;
     this._groundAt = null; this._walk = null; this._jointHead = null; this._jointTally = null;
     this._node = null; this._movedAt = null; this._seen = null; this._movedOut = null;
     for (const [name, Type] of COLUMNS) this[name] = new Type(0);
@@ -635,6 +638,7 @@ export class World {
     if (spec.type === 'character') {
       out.maxSlope = spec.maxSlope;
       out.stepHeight = spec.stepGiven ? spec.stepHeight : null;
+      out.pushForce = spec.pushForce;
     }
     out.position = [...spec.position];
     out.rotation = [...spec.rotation];
@@ -910,6 +914,8 @@ export class World {
     if (this._characterCount > 0) {
       this._characterSteps++;
       walk(this, dt);
+      // Anything a character pushed awake gets its pairs back before the step solves them.
+      if (this._wakePending) this._syncPairs();
     }
 
     // Only awake bodies move in a step; static and sleeping ones' `previous`
@@ -2216,6 +2222,7 @@ export class World {
       maxSlope: this._maxSlope[s],
       stepHeight: this._stepHeight[s],
       stepGiven: this._stepGiven[s] === 1,
+      pushForce: this._pushForce[s],
       position: [pose[0], pose[1], pose[2]],
       rotation: [pose[3], pose[4], pose[5], pose[6]],
       velocity: [this._velocity[s3], this._velocity[s3 + 1], this._velocity[s3 + 2]],
@@ -2338,6 +2345,7 @@ export class World {
     this._unlocked(s);
     this._maxSlope[s] = spec.maxSlope;
     this._slopeCos[s] = cos(spec.maxSlope);
+    this._pushForce[s] = spec.pushForce;
     this._stepGiven[s] = spec.stepGiven ? 1 : 0;
     // Unless given, a ninth of its height: building codes cap a stair's rise
     // near 0.2 m, a ninth of a 1.8 m person, and so it scales with its size.
@@ -2526,6 +2534,7 @@ function resolve(caller, base, given) {
     stepHeight = h;
     stepGiven = true;
   }
+  const pushForce = has('pushForce') ? atLeastZero(caller, 'pushForce', given.pushForce) : base.pushForce;
 
   const position = has('position') ? vec3(caller, 'position', given.position) : base.position;
   const rotation = has('rotation') ? quat(caller, 'rotation', given.rotation) : base.rotation;
@@ -2543,7 +2552,7 @@ function resolve(caller, base, given) {
   return {
     type, shape, size, radius, height, geometry, density, mass, massGiven, inertia, inertiaGiven, centerOfMass,
     friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, sensor,
-    lockRotation, maxSlope, stepHeight, stepGiven, position, rotation, velocity, angularVelocity,
+    lockRotation, maxSlope, stepHeight, stepGiven, pushForce, position, rotation, velocity, angularVelocity,
   };
 }
 

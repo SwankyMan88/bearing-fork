@@ -288,3 +288,28 @@ test('off means off: a world with no characters never runs their pass', () => {
   assert.equal(world._characterSteps, 1);
   assert.equal(world._characterCount, 0);
 });
+
+test('given a pushForce, a character pushes what it walks into, no harder than that; without one, nothing', () => {
+  // Walking at 2 m/s into a crate on friction 0.5, which holds 20 kg with 98 N.
+  const walkInto = (pushForce, mass, other = {}) => {
+    const world = new World();
+    world.addBody({ type: 'static', size: [40, 1, 40], position: [0, -0.5, 0] });
+    const crate = world.addBody({ size: [1, 1, 1], position: [2, 0.5, 0], mass, ...other });
+    const hero = world.addBody({ type: 'character', shape: 'capsule', radius: R, height: H, position: [0, H / 2, 0], pushForce });
+    for (let i = 0; i < 60; i++) world.step(DT);
+    for (let i = 0; i < 180; i++) { hero.setVelocity(2, 0, 0); world.step(DT); }
+    return { moved: crate.position[0] - 2, speed: crate.velocity[0], gap: crate.position[0] - 0.5 - hero.position[0] - R, world, crate };
+  };
+  const none = walkInto(0, 20);
+  assert.equal(none.moved, 0, 'pushed with no pushForce');
+  const weak = walkInto(100, 20), strong = walkInto(2000, 20), heavy = walkInto(2000, 1000);
+  assert.ok(weak.speed > 0.1 && weak.speed < 0.4, `100 N moved 20 kg at ${weak.speed} m/s, just past friction's 98 N`);
+  assert.ok(strong.speed > 1.8 && strong.moved > 4, `2000 N kept 20 kg at ${strong.speed} m/s, ${strong.moved} m`);
+  assert.ok(Math.abs(heavy.moved) < 0.01, `2000 N moved 1000 kg, held by 4,900 N, ${heavy.moved} m`);
+  // Never into it: it stops at the crate as at a wall.
+  for (const r of [weak, strong, heavy]) assert.ok(r.gap > -0.01, `the character went ${-r.gap} m into the crate`);
+  // A sleeping crate is woken by the push and moves the same step.
+  const asleep = walkInto(2000, 20, { position: [6, 0.5, 0] });
+  assert.ok(asleep.moved > 0.5, `a crate asleep when reached moved ${asleep.moved} m`);
+  assert.equal(asleep.world.bodyOf(asleep.world.body(asleep.world._slots.id(2))).pushForce, 2000);
+});

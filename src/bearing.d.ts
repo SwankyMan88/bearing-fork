@@ -66,6 +66,8 @@ interface BodyCommon {
   maxSlope?: number;
   /** The tallest step a character walks up, m, default its height ÷ 9; null follows its size. Characters only. */
   stepHeight?: number | null;
+  /** The most a character pushes a dynamic body it walks into with, N, default 0 (none). Characters only. */
+  pushForce?: number;
   /** m, default [0, 0, 0]. */
   position?: Vec3;
   /** Quaternion [x, y, z, w], default [0, 0, 0, 1]. Normalized as it comes in. */
@@ -153,9 +155,10 @@ export interface CompoundOptions extends Omit<BodyCommon, 'type'> {
 }
 
 /** Level geometry: static unless made kinematic, never dynamic, with no mass, density or inertia. */
-interface LevelCommon extends Omit<BodyCommon, 'type' | 'density' | 'mass' | 'inertia' | 'centerOfMass' | 'maxSlope' | 'stepHeight'> {
+interface LevelCommon extends Omit<BodyCommon, 'type' | 'density' | 'mass' | 'inertia' | 'centerOfMass' | 'maxSlope' | 'stepHeight' | 'pushForce'> {
   maxSlope?: never;
   stepHeight?: never;
+  pushForce?: never;
   /** Default 'static'. */
   type?: 'static' | 'kinematic';
   density?: never;
@@ -236,6 +239,8 @@ interface BodyInfoCommon {
   maxSlope?: number;
   /** A character's: as given, or null while it follows its size. */
   stepHeight?: number | null;
+  /** A character's. */
+  pushForce?: number;
   position: [number, number, number];
   rotation: [number, number, number, number];
   /** Absent for a static body. */
@@ -255,10 +260,10 @@ export type BodyInfo =
   | (LevelInfoCommon & { shape: 'heightfield'; heights: number[]; columns: number; spacing: number });
 
 /** A mesh's or heightfield's: never dynamic, and no mass, density or inertia. */
-type LevelInfoCommon = Omit<BodyInfoCommon, 'type' | 'mass' | 'density' | 'inertia' | 'centerOfMass' | 'maxSlope' | 'stepHeight'> & { type: 'static' | 'kinematic' };
+type LevelInfoCommon = Omit<BodyInfoCommon, 'type' | 'mass' | 'density' | 'inertia' | 'centerOfMass' | 'maxSlope' | 'stepHeight' | 'pushForce'> & { type: 'static' | 'kinematic' };
 
 /** A hull's or compound's: never a character. */
-type SolidInfoCommon = Omit<BodyInfoCommon, 'type' | 'maxSlope' | 'stepHeight'> & { type: 'dynamic' | 'static' | 'kinematic' };
+type SolidInfoCommon = Omit<BodyInfoCommon, 'type' | 'maxSlope' | 'stepHeight' | 'pushForce'> & { type: 'dynamic' | 'static' | 'kinematic' };
 
 /** A compound's part as bodyOf gives it: the options it was made from. A hull's vertices are its corners. */
 export type PartInfo = {
