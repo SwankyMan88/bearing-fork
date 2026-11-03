@@ -447,7 +447,13 @@ function pairable(w, a, b) {
   return filtered(w, a, b);
 }
 
-/** Each body's layers must be in the other's mask (Box2D's rule, and Rapier's and Jolt's). */
+/**
+ * Each body's layers must be in the other's mask (Box2D's rule, and Rapier's
+ * and Jolt's), and the two not of one group: 32 layers can't keep each of a
+ * hundred ragdolls' parts off one another, a group each can (Box2D's negative
+ * groupIndex, Jolt's group filter).
+ */
 function filtered(w, a, b) {
-  return (w._layers[a] & w._mask[b]) !== 0 && (w._layers[b] & w._mask[a]) !== 0;
+  const g = w._group[a];
+  return (w._layers[a] & w._mask[b]) !== 0 && (w._layers[b] & w._mask[a]) !== 0 && (g === 0 || g !== w._group[b]);
 }

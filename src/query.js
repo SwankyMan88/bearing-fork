@@ -161,12 +161,12 @@ function strays(world) {
 }
 
 /**
- * Whether a query with this mask and ignore looks at slot s. Never a sensor:
+ * Whether a query with this mask and ignore (a list of slots) looks at slot s. Never a sensor:
  * a bullet's ray shouldn't stop at an invisible trigger zone, which is the
  * trap Unity's opposite default sets. What is in a zone is for events and
  * world.touching().
  */
-const wanted = (world, s, mask, ignore) => s !== ignore && (world._layers[s] & mask) !== 0 && world._sensor[s] === 0;
+const wanted = (world, s, mask, ignore) => (world._layers[s] & mask) !== 0 && world._sensor[s] === 0 && !ignore.includes(s);
 
 // ---- rays ----
 
@@ -593,6 +593,7 @@ const levelNormal = new Float64Array(3), levelPoint = new Float64Array(3), level
 function blocks(world, s, o, other) {
   return o !== s && o !== other && world._sensor[o] === 0
     && (world._layers[s] & world._mask[o]) !== 0 && (world._layers[o] & world._mask[s]) !== 0
+    && (world._group[s] === 0 || world._group[s] !== world._group[o])
     && !(world._jointHead[s] !== 0 && world._jointHead[o] !== 0 && apart(world, s, o));
 }
 

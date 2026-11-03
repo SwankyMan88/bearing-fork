@@ -83,6 +83,7 @@ function brute(world, dt) {
     for (let b = a + 1; b < n; b++) {
       if (state[b] !== 1 || (type[a] !== 0 && type[b] !== 0)) continue;
       if ((world._layers[a] & world._mask[b]) === 0 || (world._layers[b] & world._mask[a]) === 0) continue;
+      if (world._group[a] !== 0 && world._group[a] === world._group[b]) continue;
       load(world, a, A);
       load(world, b, B);
       const tolerance = Math.min(world._size[a], world._size[b]) * PIXEL;
@@ -116,6 +117,7 @@ function scene(seed, steps, check) {
       position: [(rand() - 0.5) * 20, rand() * 15, (rand() - 0.5) * 20],
       rotation: [rand() - 0.5, rand() - 0.5, rand() - 0.5, rand() - 0.5],
       layers: 1 << Math.floor(rand() * 3), mask: rand() < 0.2 ? ~(1 << Math.floor(rand() * 3)) : 0xffffffff,
+      group: rand() < 0.3 ? 1 + Math.floor(rand() * 3) : 0,
     });
   };
   const bodies = [];
@@ -127,6 +129,7 @@ function scene(seed, steps, check) {
       // Teleported, retyped and refiltered by hand, between steps.
       bodies[Math.floor(rand() * bodies.length)].setPosition((rand() - 0.5) * 20, rand() * 10, 0);
       world.setBody(bodies[Math.floor(rand() * bodies.length)], { mask: rand() < 0.5 ? 0 : 0xffffffff });
+      world.setBody(bodies[Math.floor(rand() * bodies.length)], { group: Math.floor(rand() * 3) });
     }
     check?.(world);
     world.step(1 / 60);
@@ -199,6 +202,7 @@ test('every listed pair\'s fat boxes overlap, and every pair whose step boxes do
       for (let b = a + 1; b < n; b++) {
         if (state[b] !== 1 || (type[a] !== 0 && type[b] !== 0)) continue;
         if ((world._layers[a] & world._mask[b]) === 0 || (world._layers[b] & world._mask[a]) === 0) continue;
+        if (world._group[a] !== 0 && world._group[a] === world._group[b]) continue;
         if (overlaps(box, 6 * a, box, 6 * b)) assert.ok(listed.has(`${a}-${b}`), `${a}-${b} missed`);
       }
     }
@@ -270,4 +274,34 @@ test('off means off: nothing moving means no tree is touched, and a pile at rest
   const resting = count(pile);
   steps(pile, 1);
   assert.deepEqual(resting, { query: 0, move: 0 });
+});
+
+test('bodies of one group never collide, sense or block each other, and collide with everything else', () => {
+  const world = new World();
+  const floor = world.addBody({ type: 'static', size: [10, 1, 10], position: [0, -0.5, 0] });
+  // A box dropped through another of its group lands on the floor; one of no
+  // group (0), or another group, lands on top.
+  const low = world.addBody({ position: [0, 0.5, 0], group: 7 });
+  const mate = world.addBody({ position: [0, 3, 0], group: 7 });
+  const other = world.addBody({ position: [3, 0.5, 0], group: 7 });
+  const stranger = world.addBody({ position: [3, 3, 0], group: 8 });
+  const zone = world.addBody({ type: 'static', size: [1, 1, 1], position: [-3, 0.5, 0], sensor: true, group: 7 });
+  const walker = world.addBody({ type: 'character', position: [-3, 0.9, 3], group: 7 });
+  const wall = world.addBody({ type: 'static', size: [0.2, 3, 3], position: [-3, 1.5, 1.5], group: 7 });
+  for (let i = 0; i < 120; i++) {
+    walker.setVelocity(0, 0, -2);
+    world.step(1 / 60);
+  }
+  assert.ok(Math.abs(mate.position[1] - 0.5) < 0.01, `the mate came to rest at ${mate.position[1]}, not on the floor`);
+  assert.ok(Math.abs(stranger.position[1] - 1.5) < 0.01, `the stranger came to rest at ${stranger.position[1]}, not on the box`);
+  assert.deepEqual(world.touching(low).map((b) => b.id), [floor.id]);
+  assert.equal(world.touching(zone).length, 0, 'the zone saw its own group');
+  assert.ok(walker.position[2] < -0.5, `the character stopped at the wall of its group, z ${walker.position[2]}`);
+  // Changed by setBody, it takes effect at the next step, as layers do.
+  world.setBody(other, { group: 0 });
+  world.setBody(stranger, { position: [3, 1.5, 0] });
+  world.step(1 / 60);
+  assert.deepEqual(world.touching(other).map((b) => b.id).sort(), [floor.id, stranger.id].sort());
+  assert.equal(world.bodyOf(mate).group, 7);
+  assert.equal(world.bodyOf(floor).group, 0);
 });

@@ -15,6 +15,19 @@ All notable changes to Bearing are recorded here. The format follows
   into it. It comes when the pair's fastest closing speed rose since the last step by more than a
   bounce too small to see, so steady pressing gives none. Every hit is now a begin or an impact.
   The save format is 11.
+- **Groups.** Body option `group`: bodies of the same group never collide with each other,
+  whatever their layers, so a hundred ragdolls can each keep their own parts apart, which 32
+  layers can't. Any whole number, a body's `id` included; `0`, the default, is none. It holds for
+  contacts, sensors and characters. The save format is 12.
+- **`ignore` takes a list.** `raycast`, `raycastAll`, `shapeCast` and `overlap` leave out every body
+  in a list given as `ignore`, such as a ragdoll's own parts, as well as one body as before. A
+  wrong value says so: `ignore must be a Body or a list of Bodies, got …`, `ignore[1] must be a
+  Body, got …`.
+- **`body.moveTo(position, rotation, dt)`.** Sets the velocities that bring a body to a pose over
+  the next step, so an animated kinematic body (a door, an arm, a platform on a path) pushes what
+  it meets as it goes. A kinematic body lands on the pose to rounding, its turn worked out with
+  Bearing's own sine, cosine and arctangent, as Box2D 3's `b2Body_SetTargetTransform` and Jolt's
+  `MoveKinematic` do it but exact.
 
 ## [1.0.0] - 2026-11-03
 

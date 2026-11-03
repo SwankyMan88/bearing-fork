@@ -87,7 +87,7 @@ test('the save holds every field of the world: a new one must change FORMAT and 
     '_catchSteps', '_catches', '_caught', '_ceiling', '_characterCount', '_characterSteps', '_com', '_comGiven',
     '_contacts', '_damping', '_density', '_destroyed', '_dims', '_drives', '_epoch', '_events', '_fast', '_force',
     '_forced', '_forcedSlots', '_frame', '_framed', '_framedCount', '_friction', '_frozen', '_frozenCount',
-    '_geometry', '_gravity', '_gravityScale', '_ground', '_groundAt', '_impacts', '_inAwake', '_inertia',
+    '_geometry', '_gravity', '_gravityScale', '_ground', '_groundAt', '_group', '_impacts', '_inAwake', '_inertia',
     '_inertiaGiven', '_inner', '_invI', '_invInertia', '_invMass', '_island', '_islandNext', '_islandSteps',
     '_jointHead', '_jointSteps', '_jointTally', '_joints', '_layers', '_least', '_lock', '_logAt', '_logCount',
     '_logFloor', '_logLast', '_logSlots', '_mask', '_mass', '_massGiven', '_maxSlope', '_motion', '_movedAt',
@@ -106,7 +106,7 @@ test('load refuses what save() didn\'t write, data of another version or format,
   const data = new World().save();
   assert.equal(data.version, VERSION);
   assert.throws(() => World.load({ ...data, version: '9.9.9' }), /^Error: load: this data was saved by Bearing 9\.9\.9, and this is /);
-  assert.throws(() => World.load({ ...data, format: 0 }), /^Error: load: data is format 0; this Bearing reads format 11$/);
+  assert.throws(() => World.load({ ...data, format: 0 }), /^Error: load: data is format 0; this Bearing reads format 12$/);
   const damaged = JSON.parse(JSON.stringify(data));
   damaged.objects[0].f._slots = { r: 999 };
   assert.throws(() => World.load(damaged), /^Error: load: data is damaged: a link to object 999, of \d+$/);

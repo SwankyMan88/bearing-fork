@@ -111,16 +111,19 @@ function alone(world, from, d) {
   return out.sort((a, b) => a.distance - b.distance || a.slot - b.slot);
 }
 
-test('raycast and raycastAll find what testing every body alone finds, through mask, ignore and maxDistance', () => {
+test('raycast and raycastAll find what testing every body alone finds, through mask, ignore (one or a list) and maxDistance', () => {
   const { world, bodies } = scene();
   for (let i = 0; i < 150; i++) {
     const from = [between(-12, 12), between(0.5, 15), between(-12, 12)];
     const d = unit([rand() - 0.5, rand() - 0.7, rand() - 0.5]);
     const mask = rand() < 0.3 ? 1 << Math.floor(rand() * 3) : 0xffffffff;
-    const ignore = rand() < 0.3 ? bodies[Math.floor(rand() * bodies.length)] : null;
+    // One body, a list of some, or none.
+    const pick = () => bodies[Math.floor(rand() * bodies.length)];
+    const r = rand(), ignore = r < 0.2 ? pick() : r < 0.4 ? [pick(), pick(), pick()] : null;
+    const left = [ignore ?? []].flat().map((b) => b.slot);
     const maxDistance = rand() < 0.3 ? between(1, 20) : Infinity;
     const expected = alone(world, from, d)
-      .filter((h) => (h.layers & mask) !== 0 && h.slot !== ignore?.slot && h.distance < maxDistance);
+      .filter((h) => (h.layers & mask) !== 0 && !left.includes(h.slot) && h.distance < maxDistance);
     const all = world.raycastAll(from, d, { mask, ignore, maxDistance });
     assert.deepEqual(all.map((h) => h.body.slot), expected.map((h) => h.slot), `ray ${i}`);
     all.forEach((h, k) => assert.ok(Math.abs(h.distance - expected[k].distance) < 1e-12));

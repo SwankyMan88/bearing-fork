@@ -29,6 +29,9 @@ export function examples(): void {
   const all = world.raycastAll([0, 5, 0], [0, -1, 0]);
   const cast = world.shapeCast({ shape: "capsule", radius: 0.3, height: 1.8 }, [0, 5, 0], [1, 0, 0], { rotation: [0, 0, 0, 1], mask: 1 });
   const near: Body[] = world.overlap({ shape: "sphere", radius: 2 }, [0, 0, 0]);
+  const others: Body[] = world.overlap({}, [0, 0, 0], { ignore: [debris, debris] });
+  world.setBody(debris, { group: debris.id });
+  const group: number = world.bodyOf(debris).group;
   const loaded: World = World.load(JSON.parse(JSON.stringify(world.save())));
   const lines: Float32Array = loaded.debugLines({ contacts: false, boxes: true });
   // @ts-expect-error: debug lines are drawn or not, true or false
@@ -65,6 +68,7 @@ export function examples(): void {
   const position: Vec3 = [t[o], t[o + 1], t[o + 2]];
   marble.setPosition(position[0], 5, 0).setVelocity(2, 0, 0).setRotation([0, 0, 0, 1]);
   player.setEuler(Math.PI / 2, 0).setAxisAngle([0, 1, 0], 1).setAngularVelocity(0, 1, 0);
+  marble.moveTo([1, 2, 3], null, 1 / 60).moveTo(position, [0, 0, 0, 1], 1 / 60);
   const [x, y, z, w] = marble.rotation;
   const mass: number = marble.mass;
   const [ix, iy, iz] = crate.inertia;

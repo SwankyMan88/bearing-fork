@@ -255,3 +255,39 @@ test('forces, impulses and tumbling give the same result twice, to the bit', () 
   const a = run(), b = run();
   assert.ok(a.every((x, i) => Object.is(x, b[i])));
 });
+
+test('moveTo brings a kinematic body to the pose given, to rounding, however far it turns', () => {
+  for (const substeps of [1, 3, 8]) {
+    const world = new World({ substeps });
+    const plate = world.addBody({ type: 'kinematic', size: [2, 0.2, 1], position: [0, 1, 0] });
+    // A compound with its centre of mass off its origin: the origin is what lands.
+    const arm = world.addBody({
+      type: 'kinematic', shape: 'compound', position: [3, 1, 0],
+      parts: [{ size: [1, 1, 1] }, { shape: 'sphere', radius: 0.5, position: [2, 0, 0], density: 5000 }],
+    });
+    const poses = [[[1, 2, 3], [Math.SQRT1_2, 0, 0, Math.SQRT1_2]], [[-2, 0, 1], [0.1, 0.9, -0.3, 0.2]], [[-2, 0, 1], null]];
+    for (const [position, rotation] of poses) {
+      for (const body of [plate, arm]) {
+        const was = body.rotation;
+        body.moveTo(position, rotation, 1 / 60);
+        world.step(1 / 60);
+        const q = rotation ?? was, n = Math.hypot(...q);
+        // The same rotation either sign.
+        const sign = Math.sign(body.rotation.reduce((d, x, k) => d + x * q[k], 0));
+        body.position.forEach((x, k) => assert.ok(Math.abs(x - position[k]) < 1e-12, `${substeps} substeps: at ${body.position}`));
+        body.rotation.forEach((x, k) => assert.ok(Math.abs(sign * x - q[k] / n) < 1e-12, `${substeps} substeps: turned ${body.rotation}`));
+      }
+    }
+  }
+  // Moved into a resting box, it pushes it as a body moving that fast would.
+  const world = new World();
+  world.addBody({ type: 'static', size: [10, 1, 10], position: [0, -0.5, 0] });
+  const box = world.addBody({ position: [1, 0.5, 0], friction: 0 });
+  const paddle = world.addBody({ type: 'kinematic', size: [0.2, 1, 2], position: [0, 0.5, 0] });
+  for (let i = 1; i <= 30; i++) {
+    paddle.moveTo([i * 0.05, 0.5, 0], null, 1 / 60);
+    world.step(1 / 60);
+  }
+  assert.ok(Math.abs(paddle.velocity[0] - 3) < 1e-9);
+  assert.ok(box.position[0] > 1.5 && Math.abs(box.velocity[0] - 3) < 0.01, `the box at ${box.position[0]} m, ${box.velocity[0]} m/s`);
+});

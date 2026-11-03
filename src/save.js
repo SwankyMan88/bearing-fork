@@ -65,9 +65,10 @@ import { COLOURS, DIGITS } from './graph.js';
  * 10 since a joint keeps its axis as given (joints.js, the axis column), which
  * jointOf reads back: data of format 9 has none. 11 since a touching pair
  * keeps how fast it last met (pairs.js, the closing column), which impact
- * events are measured from: data of format 10 has none.
+ * events are measured from: data of format 10 has none. 12 since a body
+ * has a group (World._group): data of format 11 has none.
  */
-export const FORMAT = 11;
+export const FORMAT = 12;
 
 /**
  * The version of Bearing this is, stamped into every save: package.json's,
