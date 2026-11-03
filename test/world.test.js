@@ -20,7 +20,7 @@ test('addBody({}) makes a 1 m box of water at rest at the origin', () => {
   assert.equal(world.bodyCount, 1);
   assert.equal(body.mass, 1000);
   assert.deepEqual(world.bodyOf(body), {
-    type: 'dynamic', shape: 'box', size: [1, 1, 1], density: 1000,
+    type: 'dynamic', shape: 'box', size: [1, 1, 1], density: 1000, inertia: null, centerOfMass: null,
     friction: 0.5, restitution: 0, damping: 0, angularDamping: 0, gravityScale: 1,
     layers: 1, mask: 0xffffffff, sensor: false, lockRotation: [false, false, false],
     position: [0, 0, 0], rotation: [0, 0, 0, 1], velocity: [0, 0, 0], angularVelocity: [0, 0, 0],
@@ -63,6 +63,10 @@ test('bodyOf round-trips through addBody, for every shape and type', () => {
     const twin = world.addBody(world.bodyOf(body));
     assert.deepEqual(world.bodyOf(twin), world.bodyOf(body));
     assert.notEqual(twin.id, body.id);
+    // And through setBody: given back what it reads, a body is as it was.
+    const before = world.bodyOf(body);
+    world.setBody(body, before);
+    assert.deepEqual(world.bodyOf(body), before);
   }
 });
 
@@ -247,7 +251,7 @@ test('two worlds never touch', () => {
   assert.equal(a.id, b.id);
   one.step(1);
   assert.deepEqual(b.velocity, [0, 0, 0]);
-  assert.throws(() => two.remove(a), { message: 'remove: that body belongs to another world' });
+  assert.throws(() => two.remove(a), { message: 'remove: handle belongs to another world' });
 });
 
 test('storage grows as bodies are added and shrinks as they go', () => {
@@ -270,7 +274,7 @@ test('a destroyed world lets go of everything and refuses to be used', () => {
   world.destroy();
   assert.equal(body.alive, false);
   assert.throws(() => world.addBody({}), { message: 'addBody: this world was destroyed' });
-  assert.throws(() => body.position, { message: 'position: this world was destroyed' });
+  assert.throws(() => body.position, { message: 'body.position: this world was destroyed' });
 });
 
 test('a step does what it did before, bit for bit', () => {

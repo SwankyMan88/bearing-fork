@@ -221,7 +221,7 @@ test('a hinge\'s or slider\'s friction is its motor held at 0, to the bit', () =
     return [...world.transforms, ...world._velocity, ...world._angular, ...world._joints.impulse];
   };
   for (const k of [0.5, 1.5]) {
-    const friction = run(k, (f) => ({ friction: f }));
+    const friction = run(k, (f) => ({ frictionForce: f }));
     assert.deepEqual(friction, run(k, (f) => ({ motorSpeed: 0, motorForce: f })), `${k} times the load`);
     assert.notDeepEqual(friction, run(k, () => ({})), `${k} times the load: friction does something`);
   }
@@ -235,7 +235,7 @@ test('a ball joint\'s friction holds a pendulum above it, slows one below, and i
     const c = Math.cos(turn), s = Math.sin(turn);
     // Turned about y: x goes to (c, 0, -s), z to (s, 0, c).
     const bob = world.addBody({ shape: 'sphere', radius: 0.05, position: [c, 0, -s], velocity: [kick * s, 0, kick * c] });
-    world.addJoint({ a: bob, anchor: [0, 0, 0], friction: k * bob.mass * 9.81 });
+    world.addJoint({ a: bob, anchor: [0, 0, 0], frictionForce: k * bob.mass * 9.81 });
     return { world, bob, back: (p) => [c * p[0] - s * p[2], p[1], s * p[0] + c * p[2]] };
   };
   // Above: held where it was let go. It dips 0.04 mm in the first step, the
@@ -307,7 +307,7 @@ test('ragdolls with friction in their joints stop swinging and sleep', () => {
       const plus = (p) => [at[0] + p[0], at[1] + p[1], at[2] + p[2]];
       const b = PARTS.map(([size, p]) => world.addBody({ size, position: plus(p) }));
       parts.push(...b);
-      for (const [type, a, bb, p, axis] of JOINTS) world.addJoint({ type, a: b[a], b: b[bb], anchor: plus(p), friction: 1, ...(axis ? { axis } : {}) });
+      for (const [type, a, bb, p, axis] of JOINTS) world.addJoint({ type, a: b[a], b: b[bb], anchor: plus(p), frictionForce: 1, ...(axis ? { axis } : {}) });
     }
     for (let step = 0; step < 8 * 60 && !parts.every((b) => b.asleep); step++) world.step(DT);
     assert.ok(parts.every((b) => b.asleep), `moved ${nudge} nm: ${parts.filter((b) => b.asleep).length} of 352 asleep at 8 s`);
@@ -660,12 +660,12 @@ test('jointOf gives back what addJoint took, and setJoint changes it', () => {
   assert.equal(o.a.id, a.id);
   assert.equal(o.b.id, b.id);
   assert.deepEqual(o.anchor, [0, 2.5, 0]);
-  assert.ok(apart(o.axis, [1, 0, 0]) < 1e-15, `${o.axis}`);
+  assert.deepEqual(o.axis, [1, 0, 0]);
   assert.equal(o.min, -1);
   assert.equal(o.max, 1);
   assert.equal(o.motorSpeed, 0);
   assert.equal(o.motorForce, 5);
-  assert.equal(o.friction, 0);
+  assert.equal(o.frictionForce, 0);
   assert.equal(o.collide, false);
   assert.equal('cone' in o || 'length' in o || 'anchorB' in o, false);
   // A copy, from what jointOf gave.
@@ -679,21 +679,57 @@ test('jointOf gives back what addJoint took, and setJoint changes it', () => {
   assert.deepEqual(d.anchorB, [0, 2.5, 0]);
   assert.equal(d.length, 0);
   assert.equal(d.collide, true);
-  assert.equal('min' in d || 'max' in d || 'friction' in d, false);
+  assert.equal(d.min, null);
+  assert.equal(d.max, null);
+  assert.equal('frictionForce' in d || 'axis' in d, false);
   // Friction, for a ball joint, a hinge and a slider, and copied with the rest.
-  const ball = world.addJoint({ a, b, friction: 3 });
-  assert.equal(world.jointOf(ball).friction, 3);
-  world.setJoint(ball, { friction: 0.5 });
-  assert.equal(world.jointOf(world.addJoint(world.jointOf(ball))).friction, 0.5);
-  // null puts a limit back to its default.
+  const ball = world.addJoint({ a, b, frictionForce: 3 });
+  assert.equal(world.jointOf(ball).frictionForce, 3);
+  world.setJoint(ball, { frictionForce: 0.5 });
+  assert.equal(world.jointOf(world.addJoint(world.jointOf(ball))).frictionForce, 0.5);
+  // null puts a limit back to its default, and reads back as null.
   world.setJoint(twin, { min: null });
-  assert.equal('min' in world.jointOf(twin), false);
+  assert.equal(world.jointOf(twin).min, null);
   // To the world, a distance joint's far end is a point, given as anchorB.
   const rope = world.addJoint({ type: 'distance', a, anchorB: [0, 6, 0], min: 0 });
   const r = world.jointOf(rope);
   assert.equal(r.b, null);
   assert.deepEqual(r.anchorB, [0, 6, 0]);
   near(r.length, 4, 1e-15, 'as long as its ends were apart:');
+});
+
+test('setJoint(joint, jointOf(joint)) changes nothing mid-swing; length null; world.joint(id)', () => {
+  const make = () => {
+    const world = new World({ sleeping: false });
+    const a = world.addBody({ position: [1, 2, 0] }), b = world.addBody({ type: 'static', position: [0, 2, 0] });
+    const hinge = world.addJoint({ type: 'hinge', a, b, anchor: [0.5, 2, 0], axis: [0, 0, 2], min: -1, motorSpeed: 1, motorForce: 3 });
+    const rope = world.addJoint({ type: 'distance', a: world.addBody({ position: [3, 2, 0] }), b: a, min: 0 });
+    return { world, hinge, rope };
+  };
+  const one = make(), two = make();
+  for (let n = 0; n < 30; n++) { one.world.step(DT); two.world.step(DT); }
+  // Given back what it reads, in the middle of swinging: the same bits after, impulses and all.
+  for (const j of [two.hinge, two.rope]) two.world.setJoint(j, two.world.jointOf(j));
+  for (let n = 0; n < 60; n++) { one.world.step(DT); two.world.step(DT); }
+  assert.deepEqual([...two.world.transforms], [...one.world.transforms]);
+  const { world, hinge, rope } = two;
+  // The axis as given, unit length, not read back from the turned bodies.
+  assert.deepEqual(world.jointOf(hinge).axis, [0, 0, 1]);
+  assert.equal(world.jointOf(hinge).max, null);
+  // Naming another body is a change, which throws; b null is the world, not b.
+  assert.throws(() => world.setJoint(hinge, { b: null }), /^Error: setJoint: a and b can't change/);
+  // length null: back to as long as the ends are apart now.
+  world.setJoint(rope, { length: 5 });
+  assert.equal(world.jointOf(rope).length, 5);
+  world.setJoint(rope, { length: null });
+  const r = world.jointOf(rope);
+  near(r.length, Math.hypot(...r.anchor.map((x, k) => x - r.anchorB[k])), 1e-12, 'as long as its ends are apart:');
+  // A handle from an id, as world.body(id) gives a body's.
+  const again = world.joint(rope.id);
+  assert.ok(again instanceof Joint && again.id === rope.id && again.alive);
+  assert.equal(world.jointOf(again).type, 'distance');
+  world.remove(rope);
+  assert.equal(world.joint(rope.id).alive, false);
 });
 
 test('the tree solve agrees with a dense solve of the same equations', () => {
@@ -972,9 +1008,9 @@ test('a target with no motorForce does nothing; no target, no target work', () =
     const wheel = world.addBody({ shape: 'sphere', radius: 0.5, mass: 10 });
     world.addJoint({ type: 'hinge', a: wheel, anchor: [0, 0, 0], axis: [0, 0, 1], motorSpeed: 1, motorForce: 20, ...o.hinge });
     const bob = world.addBody({ shape: 'sphere', radius: 0.05, position: [-1, 0, 0], angularVelocity: [1, 2, 3] });
-    world.addJoint({ a: bob, anchor: [-2, 0, 0], friction: 0.3, ...o.ball });
+    world.addJoint({ a: bob, anchor: [-2, 0, 0], frictionForce: 0.3, ...o.ball });
     const crate = world.addBody({ position: [4, 2, 0], velocity: [1, -1, 0] });
-    world.addJoint({ type: 'slider', a: crate, axis: [1, -1, 0], friction: 4000, ...o.slider });
+    world.addJoint({ type: 'slider', a: crate, axis: [1, -1, 0], frictionForce: 4000, ...o.slider });
     const post = world.addBody({ position: [0, 5, 3], angularVelocity: [0, 1, 0] });
     world.addJoint({ type: 'rotation', a: post, ...o.rotation });
     for (let s = 0; s < 120; s++) world.step(DT);
@@ -1075,7 +1111,7 @@ test('every type of joint reads what it holds', () => {
     ['fixed', rod('fixed', {}), [0, 98.1, 0], [0, 0, 49.05]],
     ['hinge driven to its target', rod('hinge', { axis: [0, 0, 1], target: 0, motorForce: 1000 }), [0, 98.1, 0], [0, 0, 49.05]],
     ['ball driven to its target', rod('ball', { target: [0, 0, 0, 1], motorForce: 1000 }), [0, 98.1, 0], [0, 0, 49.05]],
-    ['ball held by friction', rod('ball', { friction: 1000 }), [0, 98.1, 0], [0, 0, 49.05]],
+    ['ball held by friction', rod('ball', { frictionForce: 1000 }), [0, 98.1, 0], [0, 0, 49.05]],
     ['slider across its axis', held('slider', { anchor: [0, -1, 0], axis: [1, 0, 0] }), [0, 98.1, 0], [0, 0, 0]],
     ['slider on its stop', held('slider', { anchor: [0, -1, 0], axis: [0, 1, 0], min: 0 }), [0, 98.1, 0], [0, 0, 0]],
     ['slider driven to its target', held('slider', { anchor: [0, -1, 0], axis: [0, 1, 0], target: 0, motorForce: 1000 }), [0, 98.1, 0], [0, 0, 0]],

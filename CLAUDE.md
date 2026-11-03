@@ -750,7 +750,8 @@ same about itself. The user says what they want simulated, and the package works
     `isSleepingEnabled`, and not `enableSleep`.
 46. **Methods are verbs and properties are nouns:** `step()`, `raycast()`, `remove()`;
     `gravity`, `bodyCount`.
-47. **Renames keep working for one minor version, then throw with directions.** Winding's renamed
+47. **Renames** (2026-11-03, for 1.x: a name renamed in a 1.x version keeps working until 2.0, may
+    warn once, and is listed in API.md's "Renamed"; before 1.0 they threw at once, as below). **Renames keep working for one minor version, then throw with directions.** Winding's renamed
     options and properties throw, naming what they are called now. For example:
     `run: overlay is now hud, with the same { scene, camera }`. The API reference keeps a
     "Renamed" section listing every old name and its new one. A renamed method can simply be

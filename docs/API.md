@@ -11,7 +11,16 @@ import { World } from 'bearing-physics';
 
 TypeScript types come with the package, so an editor shows these calls' options as you type. The
 option shapes have names you can import, such as `BodyOptions`:
-`import type { BodyOptions } from 'bearing-physics'`.
+`import type { BodyOptions } from 'bearing-physics'`. Besides `World`, `Body`, `Joint` and
+`readGlb`, the package's types are: `Vec3`, `Quat` and `Numbers` (what vectors, rotations and lists
+of numbers may be given as); `BodyType`, `ShapeType` and `JointType`; `WorldOptions`;
+`BodyOptions`, `BoxOptions`, `SphereOptions`, `CapsuleOptions`, `HullOptions`, `CompoundOptions`,
+`PartOptions`, `MeshOptions`, `HeightfieldOptions` and `BodyChanges`; `BodyInfo` and `PartInfo`
+(what [`bodyOf`](#world-bodyof) gives); `JointOptions`, `FixedJointOptions`, `BallJointOptions`,
+`HingeJointOptions`, `SliderJointOptions`, `DistanceJointOptions`, `RotationJointOptions` and
+`JointChanges`; `JointInfo` (what [`jointOf`](#world-jointof) gives); `RayOptions`,
+`CastOptions`, `OverlapOptions`, `QueryShape` and `Hit`; `ContactEvent`, `BeginEvent` and
+`EndEvent`; `Ground`; `DebugLineOptions`; `GlbOptions`; and `SavedWorld`.
 
 <a id="conventions"></a>
 ## Conventions
@@ -20,12 +29,17 @@ These hold everywhere, so one learned is one learned for good.
 
 - **Every kind of thing works the same way.** `world.addX(options)` makes one and returns a handle.
   `world.setX(handle, changes)` changes any of the options `addX` took, leaving the rest.
-  `world.xOf(handle)` returns a copy of its options. It goes with
-  [`world.remove(handle)`](#world-remove) or `handle.destroy()`. The kinds so far: bodies and
-  joints.
+  `world.xOf(handle)` returns a copy of its options: every one its kind has, in the form `addX`
+  takes, so `world.addX(world.xOf(h))` makes another like it and `world.setX(h, world.xOf(h))`
+  changes nothing. It goes with [`world.remove(handle)`](#world-remove) or `handle.destroy()`.
+  The kinds: bodies and joints.
 - **Options are one plain object, and every field has a default.** Leaving one out means the
   default, so `addBody({})` makes a valid body: a 1 m box of water. A field set to `undefined`
   counts as left out.
+- **`null` means the default, where the default isn't a fixed value**: where it is worked out, or
+  is none. Those options are a body's `inertia`, `centerOfMass` and `stepHeight`, and a joint's
+  `min`, `max`, `length` and `target`. Given `null`, such an option goes back to its default, and
+  `xOf` gives it as `null` while it follows its default, so a copy follows it too.
 - **A misspelt option throws**, with the nearest name it might have been:
   `addBody: unknown option 'postion' (did you mean 'position'?)`. A typo is never quietly ignored.
 - **Handles hold nothing.** A [`Body`](#body) is a world and an id; the body's data lives in the
@@ -40,18 +54,59 @@ These hold everywhere, so one learned is one learned for good.
 - **Vectors are plain arrays**, `[x, y, z]`, or any array-like such as a `Float32Array`. A rotation
   is a quaternion `[x, y, z, w]`, as in glTF.
 - **Errors are thrown, at the call that took the bad value**, naming the call, the option, what it
-  must be and what it got: `addBody: radius must be a positive number, got -2`. Every message a
-  call can throw is listed in its entry, word for word, with `…` or `<…>` where a value goes. A
-  call that throws has changed nothing.
+  must be and what it got: `addBody: radius must be a positive number, got -2`. A property names
+  itself: `world.gravity must be 3 finite numbers, got …`, `body.position: this body was removed`.
+  A body or joint a call is given is checked the same way by every call: `setBody: body was
+  removed`, `addJoint: b belongs to another world`, `raycast: ignore must be a Body, got 7`.
+  Every message a call can throw is listed in its entry, word for word, with `…` or `<…>` where a
+  value goes. A call that throws has changed nothing.
 - **Nothing needs setting up or tearing down in order.** There's no `init()`. The world grows its
   storage as bodies are added and gives it back as they're removed: nothing is sized in advance.
 - **The same inputs give the same results, bit for bit, on every machine.** See
   [Determinism](#determinism).
 
+<a id="promises"></a>
+## What 1.x promises
+
+From 1.0, code written against this page keeps working in every 1.x version. What that covers, and
+what it doesn't:
+
+Promised:
+
+- **Every call, option and setting on this page**: its name, what its default means, what it
+  returns and the shape of that, and its units.
+- **Bad input throws**, at the call that took it, and a call that throws changes nothing.
+
+Not promised:
+
+- **The simulation's bits from one version to the next.** A fix or a speed-up may change results.
+  Within one version they are the same on every machine (see [Determinism](#determinism)); pin the
+  version wherever results have to match.
+- **Measured figures, tolerances and tuned constants**: the numbers this page quotes from
+  measurements, how far a resting contact sags, how long a body must be still to sleep. They may
+  get better.
+- **Documented limitations.** Any release may lift one.
+- **The wording of errors.** Messages are written for people, and may be made clearer. Code
+  shouldn't match on them: that a bad call throws an `Error` is what holds.
+- **That the lists of kinds stay as they are.** New values of a body's `shape` and `type`, a
+  joint's `type` and a contact event's `type`, and new fields on what a call returns, may come in
+  any minor version. Code reading events should skip a `type` it doesn't know.
+- **Modules imported by path** (`bearing-physics/<file>.js`), and anything named with a leading
+  `_`: they are Bearing's insides, and change as it does.
+- **How ids are laid out.** An id is a whole number below 2^53, unique for the life of its world,
+  and nothing more is promised. Bodies and joints count their ids apart, so one number can be a
+  body's and a joint's: code that sends ids must say which kind each one is.
+- **Saved data across versions.** What [`world.save()`](#world-save) gives loads only into the
+  version that saved it.
+
+**Renamed in 1.x.** A name changed in a 1.x version keeps working until 2.0, perhaps with a warning
+the first time it is used, and is listed under [Renamed](#renamed) with what it is called now.
+Before 1.0, a renamed option or property throws instead, saying what it is called now.
+
 <a id="contents"></a>
 ## Contents
 
-[World](#world-class) · [Body](#body) · [Joint](#joint) · [Hulls and compounds](#hulls) · [Meshes and heightfields](#meshes) · [Character bodies](#characters) · [Joints](#joints) · [Contacts](#contacts) · [Contact events and sensors](#events) · [Layers and masks](#layers) · [Sleeping](#sleeping) · [Queries](#queries) · [Determinism](#determinism) · [Limits](#limits)
+[What 1.x promises](#promises) · [World](#world-class) · [Body](#body) · [Joint](#joint) · [Hulls and compounds](#hulls) · [Meshes and heightfields](#meshes) · [Character bodies](#characters) · [Joints](#joints) · [Contacts](#contacts) · [Contact events and sensors](#events) · [Layers and masks](#layers) · [Sleeping](#sleeping) · [Queries](#queries) · [Determinism](#determinism) · [Limits](#limits) · [Renamed](#renamed)
 
 <a id="index"></a>
 ## Index
@@ -62,7 +117,7 @@ Every call, setting and entry, A to Z by its name.
 
 **B** &nbsp; [`world.body()`](#world-body) · [`world.bodyCount`](#world-bodycount) · [`world.bodyOf()`](#world-bodyof)
 
-**C** &nbsp; [`body.centerOfMass`](#body-centerofmass) · [Character bodies](#characters) · [Contact events and sensors](#events) · [Contacts](#contacts) · [`world.contacts()`](#world-contacts)
+**C** &nbsp; [`body.centerOfMass` (renamed)](#body-centerofmass) · [Character bodies](#characters) · [Contact events and sensors](#events) · [Contacts](#contacts) · [`world.contacts()`](#world-contacts)
 
 **D** &nbsp; [`world.debugLines()`](#world-debuglines) · [`body.destroy()`](#body-destroy) · [`joint.destroy()`](#joint-destroy) · [`world.destroy()`](#world-destroy) · [Determinism](#determinism)
 
@@ -74,7 +129,7 @@ Every call, setting and entry, A to Z by its name.
 
 **I** &nbsp; [`body.id`](#body-id) · [`joint.id`](#joint-id) · [`body.inertia`](#body-inertia)
 
-**J** &nbsp; [Joint](#joint) · [`world.jointCount`](#world-jointcount) · [`world.jointOf()`](#world-jointof) · [Joints](#joints)
+**J** &nbsp; [Joint](#joint) · [`world.joint()`](#world-joint) · [`world.jointCount`](#world-jointcount) · [`world.jointOf()`](#world-jointof) · [Joints](#joints)
 
 **L** &nbsp; [Layers and masks](#layers) · [Limits](#limits) · [`World.load()`](#world-load)
 
@@ -86,7 +141,7 @@ Every call, setting and entry, A to Z by its name.
 
 **Q** &nbsp; [Queries](#queries)
 
-**R** &nbsp; [`world.raycast()`](#world-raycast) · [`world.raycastAll()`](#world-raycastall) · [`readGlb()`](#readglb) · [`world.remove()`](#world-remove) · [`body.rotation`](#body-rotation)
+**R** &nbsp; [`world.raycast()`](#world-raycast) · [`world.raycastAll()`](#world-raycastall) · [`readGlb()`](#readglb) · [`world.remove()`](#world-remove) · [Renamed](#renamed) · [`body.rotation`](#body-rotation)
 
 **S** &nbsp; [`world.save()`](#world-save) · [`body.setAngularVelocity()`](#body-setangularvelocity) · [`body.setAxisAngle()`](#body-setaxisangle) · [`world.setBody()`](#world-setbody) · [`body.setEuler()`](#body-seteuler) · [`world.setJoint()`](#world-setjoint) · [`body.setPosition()`](#body-setposition) · [`body.setRotation()`](#body-setrotation) · [`body.setVelocity()`](#body-setvelocity) · [`world.shapeCast()`](#world-shapecast) · [`world.sleeping`](#world-sleeping) · [Sleeping](#sleeping) · [`body.slot`](#body-slot) · [`world.step()`](#world-step) · [`world.stepCount`](#world-stepcount) · [`world.substeps`](#world-substeps)
 
@@ -94,7 +149,7 @@ Every call, setting and entry, A to Z by its name.
 
 **V** &nbsp; [`body.velocity`](#body-velocity)
 
-**W** &nbsp; [`new World()`](#world) · [`world.workers`](#world-workers) · [`body.world`](#body-world) · [`joint.world`](#joint-world)
+**W** &nbsp; [What 1.x promises](#promises) · [`new World()`](#world) · [`world.workers`](#world-workers) · [`body.world`](#body-world) · [`joint.world`](#joint-world) · [`body.worldCenterOfMass`](#body-worldcenterofmass)
 
 <a id="world-class"></a>
 ## World
@@ -132,7 +187,7 @@ body is added.
 The acceleration of every dynamic body, in m/s². Reading it gives a frozen copy; assign a new
 array to change it, at any time, and the next step uses it.
 
-Throws: `gravity: this world was destroyed`; `world.gravity must be 3 finite numbers, got …`.
+Throws: `world.gravity: this world was destroyed`; `world.gravity must be 3 finite numbers, got …`.
 
 ```js
 world.gravity = [0, 0, 0];         // drifting in space
@@ -149,7 +204,7 @@ How many smaller steps each [`step`](#world-step) is solved in. Contacts are sol
 moved once per substep, so more substeps hold tall stacks and heavy piles stiffer, and cost about
 that much more. Change it at any time.
 
-Throws: `substeps: this world was destroyed`; `world.substeps must be a whole number, 1 or more, got …`.
+Throws: `world.substeps: this world was destroyed`; `world.substeps must be a whole number, 1 or more, got …`.
 
 ```js
 world.substeps = 16;   // a very tall tower, held stiffer
@@ -167,7 +222,7 @@ Whether bodies at rest go to sleep: left out of steps, at no cost, until somethi
 them. On by default. Change it at any time; switching it off wakes every sleeping body. See
 [Sleeping](#sleeping).
 
-Throws: `sleeping: this world was destroyed`; `world.sleeping must be true or false, got …`.
+Throws: `world.sleeping: this world was destroyed`; `world.sleeping must be true or false, got …`.
 
 ```js
 world.sleeping = false;   // everything stays awake, as when checking a scene by eye
@@ -185,7 +240,7 @@ How many workers, threads besides the one stepping the world, may share each
 whole number for at most that many. Change it at any time; changing it ends the workers the world
 had.
 
-Throws: `workers: this world was destroyed`; `world.workers must be 'auto' or a whole number, 0 or more, got …`.
+Throws: `world.workers: this world was destroyed`; `world.workers must be 'auto' or a whole number, 0 or more, got …`.
 
 ```js
 world.workers = 0;   // one thread: nothing started, nothing shared
@@ -234,7 +289,7 @@ heightfields and compounds are found, and sleep and the rest run, on the steppin
 
 How many bodies the world holds. Read only.
 
-Throws: `bodyCount: this world was destroyed`; `world.bodyCount is read only`.
+Throws: `world.bodyCount: this world was destroyed`; `world.bodyCount is read only`.
 
 ```js
 console.log(world.bodyCount);
@@ -245,7 +300,7 @@ console.log(world.bodyCount);
 
 How many joints the world holds. Read only.
 
-Throws: `jointCount: this world was destroyed`; `world.jointCount is read only`.
+Throws: `world.jointCount: this world was destroyed`; `world.jointCount is read only`.
 
 ```js
 console.log(world.jointCount);
@@ -257,7 +312,7 @@ console.log(world.jointCount);
 How many times the world has been [stepped](#world-step) since it was made. What
 [`moved`](#world-moved) takes. Read only.
 
-Throws: `stepCount: this world was destroyed`; `world.stepCount is read only`.
+Throws: `world.stepCount: this world was destroyed`; `world.stepCount is read only`.
 
 ```js
 world.step(1 / 60);
@@ -271,7 +326,7 @@ Every body's position and rotation, 7 numbers per slot: x, y, z in metres, then 
 x, y, z, w. A body's numbers start at `body.slot * 7`. This is what a renderer reads, in one
 loop, after each step. Read only.
 
-Throws: `transforms: this world was destroyed`; `world.transforms is read only`.
+Throws: `world.transforms: this world was destroyed`; `world.transforms is read only`.
 
 ```js
 const t = world.transforms;
@@ -300,7 +355,7 @@ as [`world.transforms`](#world-transforms) is. With a fixed step, a frame usuall
 steps; blending from `previous` to `transforms` by how far it falls draws smooth motion at any
 frame rate. Read only.
 
-Throws: `previous: this world was destroyed`; `world.previous is read only`.
+Throws: `world.previous: this world was destroyed`; `world.previous is read only`.
 
 ```js
 // alpha: how far this frame sits between the last step and the next, from 0 to 1.
@@ -355,7 +410,7 @@ Adds a body and returns its [handle](#body). With no options it is a dynamic 1 m
 
 | Option | Default | Meaning |
 |---|---|---|
-| `type` | `'dynamic'`; `'static'` for a mesh or heightfield | `'dynamic'`: moved by gravity, and later by contacts and forces. `'static'`: never moves unless you move it, as the ground. `'kinematic'`: moves at the velocity you give it, ignoring gravity, as a lift or a moving platform. `'character'`: moves at the velocity you give it, but collides as a person walking does; see [Character bodies](#characters). A mesh or heightfield can't be dynamic or a character; a hull or compound can't be a character. |
+| `type` | `'dynamic'`; `'static'` for a mesh or heightfield | `'dynamic'`: moved by gravity, contacts, joints and forces. `'static'`: never moves unless you move it, as the ground. `'kinematic'`: moves at the velocity you give it, ignoring gravity, as a lift or a moving platform. `'character'`: moves at the velocity you give it, but collides as a person walking does; see [Character bodies](#characters). A mesh or heightfield can't be dynamic or a character; a hull or compound can't be a character. |
 | `shape` | `'box'` | `'box'`, `'sphere'`, `'capsule'`, `'hull'`, `'compound'`, `'mesh'` or `'heightfield'`. A hull is the convex solid round some points, and a compound several shapes as one body: see [Hulls and compounds](#hulls). The last two are level geometry: see [Meshes and heightfields](#meshes). |
 | `size` | `[1, 1, 1]` | A box's full width, height and depth, along its own x, y and z, in metres. |
 | `radius` | `0.5` | A sphere's or capsule's radius, in metres. |
@@ -378,12 +433,12 @@ Adds a body and returns its [handle](#body). With no options it is a dynamic 1 m
 | `layers` | `1` | Which of 32 layers the body is in, one bit each: the first layer only. See [Layers and masks](#layers). |
 | `mask` | `0xffffffff` | Which layers it collides with, one bit each: all of them. |
 | `sensor` | `false` | A sensor reports what overlaps it and pushes nothing. See [Contact events and sensors](#events). |
-| `lockRotation` | `[false, false, false]` | The world axes it never turns about, x, y and z: `[true, false, true]` keeps it upright. See [Character bodies](#characters). |
+| `lockRotation` | `[false, false, false]` | The world axes it never turns about, x, y and z: `[true, false, true]` keeps it upright. See [Character bodies](#characters). The name is Rapier's `lockRotations`, the one physics engines use. |
 | `maxSlope` | `π / 4` (45°) | A character's steepest walkable ground, in radians, from 0 to π/2: about where walking turns into climbing, the slope friction 1 can hold. Characters only. |
 | `stepHeight` | its height ÷ 9 | The tallest step a character walks up, in metres: a capsule's height, a box's, or a sphere's diameter, over 9. Building codes cap a stair's rise near 0.2 m, a ninth of a 1.8 m person, so a 20 cm toy climbs 2.2 cm. `null` follows the size again. Characters only. |
 | `position` | `[0, 0, 0]` | Where the body's origin is, in metres: a box's, ball's or capsule's centre, and the point a hull's points and a compound's parts are given from. |
 | `rotation` | `[0, 0, 0, 1]` | A quaternion `[x, y, z, w]`, normalized as it comes in. |
-| `velocity` | `[0, 0, 0]` | m/s. Not for a static body. |
+| `velocity` | `[0, 0, 0]` | m/s: how fast its centre of mass moves. Not for a static body. |
 | `angularVelocity` | `[0, 0, 0]` | rad/s about each world axis. Not for a static body. A body other than a sphere spins at most half a turn a step, which the step holds it to; see [Contacts](#contacts). |
 
 Returns: a [`Body`](#body).
@@ -410,7 +465,7 @@ has (`got 10 numbers`), rather than every number in it.
 Changes any of the options [`addBody`](#world-addbody) took, with the same names, defaults and
 checks, and leaves the rest as they are.
 
-Throws: `setBody: this world was destroyed`; `setBody: body must be a Body, got …`; `setBody: that body belongs to another world`; `setBody: this body was removed`; `setBody: changes must be an object, got …`; `setBody: unknown option '…' (did you mean '…'?)`; `setBody: unknown option '…' (the options are type, shape, size, radius, height, vertices, indices, heights, columns, spacing, parts, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, sensor, lockRotation, maxSlope, stepHeight, position, rotation, velocity, angularVelocity)`; `setBody: type must be 'dynamic', 'static', 'kinematic' or 'character', got …`; `setBody: shape must be 'box', 'sphere', 'capsule', 'hull', 'compound', 'mesh' or 'heightfield', got …`; `setBody: a <shape> has no <option>`; `setBody: type must be 'static' or 'kinematic' for a <shape>, got …`; `setBody: size must be 3 positive numbers, got …`; `setBody: radius must be a positive number, got …`; `setBody: height must be a positive number, got …`; `setBody: height must be at least twice radius (…), got …`; `setBody: vertices must be finite numbers, three to a vertex, got …`; `setBody: indices must be whole numbers below the vertex count (…), three to a triangle, got …`; `setBody: columns must be a whole number, 2 or more, got …`; `setBody: spacing must be a positive number, got …`; `setBody: heights must be finite numbers, rows of columns (…), 2 rows or more, got …`; `setBody: vertices must span a solid (4 points not in one plane), got …`; `setBody: type must be 'dynamic', 'static' or 'kinematic' for a <shape>, got …`; `setBody: parts must be a list of one or more parts, got …`; `setBody: parts[…] must be an object, got …`; `setBody: parts[…]: unknown option '…' (did you mean '…'?)`; `setBody: parts[…]: unknown option '…' (the options are shape, size, radius, height, vertices, position, rotation, density)`; `setBody: parts[…].shape must be 'box', 'sphere', 'capsule' or 'hull', got …`; `setBody: parts[…]: a <shape> has no <option>`; `setBody: parts[…].size must be 3 positive numbers, got …`; `setBody: parts[…].radius must be a positive number, got …`; `setBody: parts[…].height must be a positive number, got …`; `setBody: parts[…].height must be at least twice radius (…), got …`; `setBody: parts[…].vertices must be finite numbers, three to a vertex, got …`; `setBody: parts[…].vertices must span a solid (4 points not in one plane), got …`; `setBody: parts[…].position must be 3 finite numbers, got …`; `setBody: parts[…].rotation must be 4 finite numbers, not all zero, got …`; `setBody: parts[…].density must be a positive number, got …`; `setBody: give mass or density, not both`; `setBody: mass must be a positive number, got …`; `setBody: density must be a positive number, got …`; `setBody: inertia must be 3 positive numbers, or null to follow the shape, got …`; `setBody: centerOfMass must be 3 finite numbers, got …`; `setBody: a character body has no centerOfMass`; `setBody: friction must be 0 or more, got …`; `setBody: restitution must be from 0 to 1, got …`; `setBody: damping must be 0 or more, got …`; `setBody: angularDamping must be 0 or more, got …`; `setBody: gravityScale must be a finite number, got …`; `setBody: layers must be a whole number that fits in 32 bits, got …`; `setBody: mask must be a whole number that fits in 32 bits, got …`; `setBody: sensor must be true or false, got …`; `setBody: lockRotation must be 3 true or false values, got …`; `setBody: maxSlope must be an angle from 0 to π/2, in radians, got …`; `setBody: stepHeight must be 0 or more, or null to follow the size, got …`; `setBody: position must be 3 finite numbers, got …`; `setBody: rotation must be 4 finite numbers, not all zero, got …`; `setBody: a <type> body has no <option>`; `setBody: velocity must be 3 finite numbers, got …`; `setBody: angularVelocity must be 3 finite numbers, got …`.
+Throws: `setBody: this world was destroyed`; `setBody: body must be a Body, got …`; `setBody: body belongs to another world`; `setBody: body was removed`; `setBody: changes must be an object, got …`; `setBody: unknown option '…' (did you mean '…'?)`; `setBody: unknown option '…' (the options are type, shape, size, radius, height, vertices, indices, heights, columns, spacing, parts, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, sensor, lockRotation, maxSlope, stepHeight, position, rotation, velocity, angularVelocity)`; `setBody: type must be 'dynamic', 'static', 'kinematic' or 'character', got …`; `setBody: shape must be 'box', 'sphere', 'capsule', 'hull', 'compound', 'mesh' or 'heightfield', got …`; `setBody: a <shape> has no <option>`; `setBody: type must be 'static' or 'kinematic' for a <shape>, got …`; `setBody: size must be 3 positive numbers, got …`; `setBody: radius must be a positive number, got …`; `setBody: height must be a positive number, got …`; `setBody: height must be at least twice radius (…), got …`; `setBody: vertices must be finite numbers, three to a vertex, got …`; `setBody: indices must be whole numbers below the vertex count (…), three to a triangle, got …`; `setBody: columns must be a whole number, 2 or more, got …`; `setBody: spacing must be a positive number, got …`; `setBody: heights must be finite numbers, rows of columns (…), 2 rows or more, got …`; `setBody: vertices must span a solid (4 points not in one plane), got …`; `setBody: type must be 'dynamic', 'static' or 'kinematic' for a <shape>, got …`; `setBody: parts must be a list of one or more parts, got …`; `setBody: parts[…] must be an object, got …`; `setBody: parts[…]: unknown option '…' (did you mean '…'?)`; `setBody: parts[…]: unknown option '…' (the options are shape, size, radius, height, vertices, position, rotation, density)`; `setBody: parts[…].shape must be 'box', 'sphere', 'capsule' or 'hull', got …`; `setBody: parts[…]: a <shape> has no <option>`; `setBody: parts[…].size must be 3 positive numbers, got …`; `setBody: parts[…].radius must be a positive number, got …`; `setBody: parts[…].height must be a positive number, got …`; `setBody: parts[…].height must be at least twice radius (…), got …`; `setBody: parts[…].vertices must be finite numbers, three to a vertex, got …`; `setBody: parts[…].vertices must span a solid (4 points not in one plane), got …`; `setBody: parts[…].position must be 3 finite numbers, got …`; `setBody: parts[…].rotation must be 4 finite numbers, not all zero, got …`; `setBody: parts[…].density must be a positive number, got …`; `setBody: give mass or density, not both`; `setBody: mass must be a positive number, got …`; `setBody: density must be a positive number, got …`; `setBody: inertia must be 3 positive numbers, or null to follow the shape, got …`; `setBody: centerOfMass must be 3 finite numbers, got …`; `setBody: a character body has no centerOfMass`; `setBody: friction must be 0 or more, got …`; `setBody: restitution must be from 0 to 1, got …`; `setBody: damping must be 0 or more, got …`; `setBody: angularDamping must be 0 or more, got …`; `setBody: gravityScale must be a finite number, got …`; `setBody: layers must be a whole number that fits in 32 bits, got …`; `setBody: mask must be a whole number that fits in 32 bits, got …`; `setBody: sensor must be true or false, got …`; `setBody: lockRotation must be 3 true or false values, got …`; `setBody: maxSlope must be an angle from 0 to π/2, in radians, got …`; `setBody: stepHeight must be 0 or more, or null to follow the size, got …`; `setBody: position must be 3 finite numbers, got …`; `setBody: rotation must be 4 finite numbers, not all zero, got …`; `setBody: a <type> body has no <option>`; `setBody: velocity must be 3 finite numbers, got …`; `setBody: angularVelocity must be 3 finite numbers, got …`.
 
 ```js
 world.setBody(crate, { size: [2, 1, 1] });           // twice as long, and twice as heavy
@@ -435,20 +490,26 @@ A copy of the body's options as they are now, in the form [`addBody`](#world-add
 `world.addBody(world.bodyOf(body))` makes a copy of it. Changing the result changes nothing; pass
 it to [`setBody`](#world-setbody) for that.
 
-Returns: `{ type, shape, …sizes, mass or density, inertia, friction, restitution, damping, angularDamping, gravityScale, layers, mask, sensor, lockRotation, maxSlope, stepHeight, position, rotation, velocity, angularVelocity }`.
-A character's `maxSlope` always, and its `stepHeight` only if it was given one.
-`layers` and `mask` come back unsigned, from 0 to 4294967295, whichever way they were given.
-The sizes are the shape's own: `size` for a box, `radius` for a sphere, `radius` and `height` for a
-capsule, `vertices` and `indices` for a mesh, as plain arrays, and `heights`, `columns` and
-`spacing` for a heightfield. A mesh's `indices` are the triangles it kept, without any that had no
-area. `mass` if the body was given one, `density` if not, and `inertia` only if it was given one;
-none of the three for a mesh or heightfield. A static body has no `velocity` or `angularVelocity`.
+Returns: `{ type, shape, …sizes, mass or density, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, sensor, lockRotation, maxSlope, stepHeight, position, rotation, velocity, angularVelocity }`,
+each only for the bodies that have it. The sizes are the shape's own: `size` for a box, `radius`
+for a sphere, `radius` and `height` for a capsule, `vertices` for a hull (the corners it kept),
+`parts` for a compound (each `{ shape, …its sizes, position, rotation }`, a hull part's `vertices`
+its corners, with `density` if the part was given one), `vertices` and `indices` for a mesh, and
+`heights`, `columns` and `spacing` for a heightfield, all as plain arrays. A mesh's `indices` are
+the triangles it kept, without any that had no area. `mass` if the body was given one, `density`
+if not. `inertia` as given, or `null` while it is worked out from the shape and mass;
+`centerOfMass` as given, in the body's own frame, or `null` while it is the shape's. A mesh or
+heightfield has none of those four, and a character no `centerOfMass`. A character's `maxSlope`,
+and its `stepHeight`, `null` while it follows its size. `layers` and `mask` come back unsigned,
+from 0 to 4294967295, whichever way they were given. A static body has no `velocity` or
+`angularVelocity`.
 
-Throws: `bodyOf: this world was destroyed`; `bodyOf: body must be a Body, got …`; `bodyOf: that body belongs to another world`; `bodyOf: this body was removed`.
+Throws: `bodyOf: this world was destroyed`; `bodyOf: body must be a Body, got …`; `bodyOf: body belongs to another world`; `bodyOf: body was removed`.
 
 ```js
 const twin = world.addBody(world.bodyOf(crate));
 console.log(world.bodyOf(crate).position);
+world.setBody(crate, world.bodyOf(crate));   // changes nothing
 ```
 
 <a id="world-remove"></a>
@@ -458,7 +519,7 @@ Removes a body, with every joint holding it, or a joint. Its handle stops workin
 [`body.alive`](#body-alive) or [`joint.alive`](#joint-alive) becomes `false`, and its methods throw.
 Removing what is already gone does nothing.
 
-Throws: `remove: this world was destroyed`; `remove: handle must be a Body or a Joint, got …`; `remove: that body belongs to another world`; `remove: that joint belongs to another world`.
+Throws: `remove: this world was destroyed`; `remove: handle must be a Body or a Joint, got …`; `remove: handle belongs to another world`.
 
 ```js
 world.remove(crate);
@@ -484,6 +545,24 @@ const again = world.body(id);
 console.log(again.id === crate.id);   // true
 ```
 
+Notes: bodies and joints count their ids apart, so an id names a body only to `world.body`; a
+joint's goes to [`world.joint`](#world-joint).
+
+<a id="world-joint"></a>
+### `world.joint(id)` → `Joint`
+
+A handle for a joint's id, as [`world.body`](#world-body) is for a body's: for an id you stored,
+sent over a network, or saved. It does not check that the joint is alive; check
+[`joint.alive`](#joint-alive).
+
+Throws: `joint: this world was destroyed`; `joint: id must be a whole number from 0 to 9007199254740991, got …`.
+
+```js
+const lid = world.addJoint({ type: 'hinge', a: crate });
+const again = world.joint(lid.id);
+console.log(again.id === lid.id);   // true
+```
+
 <a id="world-addjoint"></a>
 ### `world.addJoint(options)` → `Joint`
 
@@ -495,24 +574,24 @@ the joint's type allows, and returns its [handle](#joint). See [Joints](#joints)
 | `type` | `'ball'` | `'fixed'`: welded, nothing free. `'ball'`: turns any way about its anchor. `'hinge'`: turns about `axis`. `'slider'`: slides along `axis`, turning not at all. `'distance'`: keeps two points `length` apart, or between `min` and `max`. `'rotation'`: holds or drives how `a` is turned against `b`, and leaves where it is free. |
 | `a` | none; it must be given | The body. Its angle, position and motor are measured against `b`. |
 | `b` | `null` | What `a` is held to: another body, or `null` for a point in the world that never moves. |
-| `anchor` | midway between their centres; with no `b`, `a`'s centre; a distance joint's, `a`'s centre | Where the joint is, in world space, in metres, where the bodies are now. Bearing works out where that is on each. Not for a rotation joint, which holds no point. |
-| `anchorB` | `anchor`; a distance joint's, `b`'s centre | Where it is on `b`, or in the world with no `b`, if not the same point: a distance joint's other end. For any other joint, a point it pulls to `anchor`. Not for a rotation joint. |
-| `axis` | `[0, 1, 0]` | A hinge's axis, a slider's direction, a ball or rotation joint's axis for `cone`, and a ball joint's for its twist. Needn't be unit length. Not for a fixed or distance joint. |
-| `min` | none | The least a's free coordinate may be: a hinge's angle or a ball joint's twist about `axis`, in radians, from -π to π, or -Infinity for none; a slider's position along `axis`, in metres; a distance joint's length, in metres, 0 or more, its `length` without a spring and 0 with one. Measured from where the joint is made. `null` goes back to the default. Not for a fixed or rotation joint. |
-| `max` | none | The most, the same way: up to π, or Infinity for none; a distance joint's, its `length` without a spring. |
-| `length` | how far apart the anchors are | A distance joint's length, in metres, 0 or more: what it holds, or springs back to. |
+| `anchor` | midway between their centres of mass; with no `b`, `a`'s centre of mass; a distance joint's, `a`'s centre of mass | Where the joint is, in world space, in metres, where the bodies are now. Bearing works out where that is on each. Not for a rotation joint, which holds no point. |
+| `anchorB` | `anchor`; a distance joint's, `b`'s centre of mass | Where it is on `b`, or in the world with no `b`, if not the same point: a distance joint's other end. For any other joint, a point it pulls to `anchor`. Not for a rotation joint. |
+| `axis` | `[0, 1, 0]` | A hinge's axis, a slider's direction, a ball or rotation joint's axis for `cone`, and a ball joint's for its twist, in world space where the bodies are now. Needn't be unit length. Not for a fixed or distance joint. |
+| `min` | none (-Infinity); a distance joint's, its `length`, or 0 with a spring | The least a's free coordinate may be: a hinge's angle or a ball joint's twist about `axis`, in radians, from -π to π, or -Infinity for none; a slider's position along `axis`, in metres; a distance joint's length, in metres, 0 or more. A hinge's angle, a slider's position and a ball joint's twist are measured from where the joint is made. `null` goes back to the default. Not for a fixed or rotation joint. |
+| `max` | none (Infinity); a distance joint's, its `length`, or none with a spring | The most, the same way: up to π, or Infinity for none. `null` goes back to the default. |
+| `length` | how far apart the anchors are | A distance joint's length, in metres, 0 or more: what it holds, or springs back to. `null` goes back to the default: how far apart the anchors are when it is set. |
 | `cone` | `π` (none) | How far a ball or rotation joint's `axis` on `a` may swing from its `axis` on `b` (the world's, with no `b`), in radians, from 0 to π. A hard stop, as `min` and `max` are. |
 | `target` | `null` (none: the motor drives a speed) | Where the motor drives `a` against `b`, as a spring (see `frequency`): a hinge's angle about `axis`, in radians, from -π to π; a slider's position along `axis`, in metres; a ball or rotation joint's turn, `[x, y, z, w]`, any length but not all zero, about `b`'s own axes (the world's with no `b`). Measured as `min` and `max` are, from where the joint was made: `0`, or `[0, 0, 0, 1]`, is as they were. It drives only while `motorForce` is more than 0. `null` goes back to none. Not for a fixed or distance joint. |
 | `motorSpeed` | `0` | The speed a hinge's or slider's motor drives `a` at against `b`: rad/s about `axis`, or m/s along it. With a `target`, how fast the target moves: Bearing carries it on as it steps, and the drive follows it without lagging. Not for a ball or rotation joint. |
-| `motorForce` | `0` (motor off) | The most the motor may push, 0 or more: N·m for a hinge, ball or rotation joint, N for a slider. `0` is a motor off, so a `target` with no `motorForce` does nothing. A ball or rotation joint's is one limit for every way it turns. A ball or rotation joint's motor with no `target` holds it from turning, up to this, as `friction` does. Not for a fixed or distance joint. |
-| `friction` | `0` (none) | The most a ball, hinge, slider or rotation joint resists `a` turning or sliding against `b` with, 0 or more, as a stiff hinge does: N·m for a ball, hinge or rotation joint, N for a slider. It acts while the motor is off. Not for a fixed or distance joint. |
+| `motorForce` | `0` (motor off) | The most the motor may push, 0 or more: N·m for a hinge, ball or rotation joint, N for a slider. `0` is a motor off, so a `target` with no `motorForce` does nothing. A ball or rotation joint's is one limit for every way it turns. A ball or rotation joint's motor with no `target` holds it from turning, up to this, as `frictionForce` does. Not for a fixed or distance joint. |
+| `frictionForce` | `0` (none) | The most a ball, hinge, slider or rotation joint resists `a` turning or sliding against `b` with, 0 or more, as a stiff hinge does: N·m for a ball, hinge or rotation joint, N for a slider. It acts while the motor is off. Not for a fixed or distance joint. |
 | `frequency` | `0` | How springy a distance joint or a motor's drive to its `target` is: how many times a second it would bounce, in Hz. A distance joint with one is a spring, pulling it to `length`; with none, a rod. A drive with none is as stiff as the solver goes, reaching its target as fast as `motorForce` lets it. Not for a fixed joint. |
 | `dampingRatio` | `1` | How quickly the spring stops bouncing: 1 settles without overshooting, as Bearing's contacts do; 0 is no damping of its own (see [Joints](#joints), Notes). Not for a fixed joint. |
-| `collide` | `false` | Whether `a` and `b` still collide with each other. |
+| `collide` | `false` | Whether `a` and `b` still collide with each other. The name is Box2D's `collideConnected`, shortened, the one physics engines use. |
 
 Returns: a [`Joint`](#joint).
 
-Throws: `addJoint: this world was destroyed`; `addJoint: options must be an object, got …`; `addJoint: unknown option '…' (did you mean '…'?)`; `addJoint: unknown option '…' (the options are type, a, b, anchor, anchorB, axis, min, max, length, cone, target, motorSpeed, motorForce, friction, frequency, dampingRatio, collide)`; `addJoint: type must be 'fixed', 'ball', 'hinge', 'slider', 'distance' or 'rotation', got …`; `addJoint: a <type> joint has no <option>`; `addJoint: a must be a Body of this world, got …`; `addJoint: a was removed`; `addJoint: b must be a Body of this world, or null, got …`; `addJoint: b was removed`; `addJoint: a and b must be different bodies`; `addJoint: anchor must be 3 finite numbers, got …`; `addJoint: anchorB must be 3 finite numbers, got …`; `addJoint: axis must be 3 finite numbers, not all zero, got …`; `addJoint: length must be 0 or more, got …`; `addJoint: cone must be an angle from 0 to π, in radians, got …`; `addJoint: target must be from -π to π, in radians, got …`; `addJoint: target must be a finite number, got …`; `addJoint: target must be 4 finite numbers, not all zero, got …`; `addJoint: motorSpeed must be a finite number, got …`; `addJoint: motorForce must be 0 or more, got …`; `addJoint: friction must be 0 or more, got …`; `addJoint: frequency must be 0 or more, got …`; `addJoint: dampingRatio must be 0 or more, got …`; `addJoint: min must be from -π to π, in radians, or -Infinity, got …`; `addJoint: max must be from -π to π, in radians, or Infinity, got …`; `addJoint: min must be a number or -Infinity, got …`; `addJoint: max must be a number or Infinity, got …`; `addJoint: min must be 0 or more, got …`; `addJoint: max must be 0 or more, or Infinity, got …`; `addJoint: min must be at most max (…), got …`; `addJoint: collide must be true or false, got …`; `addJoint: a world holds at most 16777216 joints (the slot field of an id is 24 bits)`.
+Throws: `addJoint: this world was destroyed`; `addJoint: options must be an object, got …`; `addJoint: friction is now frictionForce, the same N·m or N`; `addJoint: unknown option '…' (did you mean '…'?)`; `addJoint: unknown option '…' (the options are type, a, b, anchor, anchorB, axis, min, max, length, cone, target, motorSpeed, motorForce, frictionForce, frequency, dampingRatio, collide)`; `addJoint: type must be 'fixed', 'ball', 'hinge', 'slider', 'distance' or 'rotation', got …`; `addJoint: a <type> joint has no <option>`; `addJoint: <a or b> must be a Body, got …`; `addJoint: <a or b> belongs to another world`; `addJoint: <a or b> was removed`; `addJoint: a and b must be different bodies`; `addJoint: anchor must be 3 finite numbers, got …`; `addJoint: anchorB must be 3 finite numbers, got …`; `addJoint: axis must be 3 finite numbers, not all zero, got …`; `addJoint: length must be 0 or more, got …`; `addJoint: cone must be an angle from 0 to π, in radians, got …`; `addJoint: target must be from -π to π, in radians, got …`; `addJoint: target must be a finite number, got …`; `addJoint: target must be 4 finite numbers, not all zero, got …`; `addJoint: motorSpeed must be a finite number, got …`; `addJoint: motorForce must be 0 or more, got …`; `addJoint: frictionForce must be 0 or more, got …`; `addJoint: frequency must be 0 or more, got …`; `addJoint: dampingRatio must be 0 or more, got …`; `addJoint: min must be from -π to π, in radians, or -Infinity, got …`; `addJoint: max must be from -π to π, in radians, or Infinity, got …`; `addJoint: min must be a number or -Infinity, got …`; `addJoint: max must be a number or Infinity, got …`; `addJoint: min must be 0 or more, got …`; `addJoint: max must be 0 or more, or Infinity, got …`; `addJoint: min must be at most max (…), got …`; `addJoint: collide must be true or false, got …`; `addJoint: a world holds at most 16777216 joints (the slot field of an id is 24 bits)`.
 
 ```js
 const frame = world.addBody({ type: 'static', size: [0.1, 2, 0.1], position: [-0.05, 1, 0] });
@@ -532,10 +611,11 @@ nothing until one is made dynamic.
 <a id="world-setjoint"></a>
 ### `world.setJoint(joint, changes)`
 
-Changes any of the options [`addJoint`](#world-addjoint) took but `a` and `b`, with the same names,
-defaults and checks, and leaves the rest as they are.
+Changes any of the options [`addJoint`](#world-addjoint) took, with the same names, defaults and
+checks, and leaves the rest as they are. `a` and `b` can't change: given as they are, as
+[`jointOf`](#world-jointof) gives them, they are taken, and naming another body throws.
 
-Throws: `setJoint: this world was destroyed`; `setJoint: joint must be a Joint, got …`; `setJoint: that joint belongs to another world`; `setJoint: this joint was removed`; `setJoint: changes must be an object, got …`; `setJoint: unknown option '…' (did you mean '…'?)`; `setJoint: unknown option '…' (the options are type, a, b, anchor, anchorB, axis, min, max, length, cone, target, motorSpeed, motorForce, friction, frequency, dampingRatio, collide)`; `setJoint: a and b can't change; remove the joint and add another`; `setJoint: type must be 'fixed', 'ball', 'hinge', 'slider', 'distance' or 'rotation', got …`; `setJoint: a <type> joint has no <option>`; `setJoint: anchor must be 3 finite numbers, got …`; `setJoint: anchorB must be 3 finite numbers, got …`; `setJoint: axis must be 3 finite numbers, not all zero, got …`; `setJoint: length must be 0 or more, got …`; `setJoint: cone must be an angle from 0 to π, in radians, got …`; `setJoint: target must be from -π to π, in radians, got …`; `setJoint: target must be a finite number, got …`; `setJoint: target must be 4 finite numbers, not all zero, got …`; `setJoint: motorSpeed must be a finite number, got …`; `setJoint: motorForce must be 0 or more, got …`; `setJoint: friction must be 0 or more, got …`; `setJoint: frequency must be 0 or more, got …`; `setJoint: dampingRatio must be 0 or more, got …`; `setJoint: min must be from -π to π, in radians, or -Infinity, got …`; `setJoint: max must be from -π to π, in radians, or Infinity, got …`; `setJoint: min must be a number or -Infinity, got …`; `setJoint: max must be a number or Infinity, got …`; `setJoint: min must be 0 or more, got …`; `setJoint: max must be 0 or more, or Infinity, got …`; `setJoint: min must be at most max (…), got …`; `setJoint: collide must be true or false, got …`.
+Throws: `setJoint: this world was destroyed`; `setJoint: joint must be a Joint, got …`; `setJoint: joint belongs to another world`; `setJoint: joint was removed`; `setJoint: changes must be an object, got …`; `setJoint: friction is now frictionForce, the same N·m or N`; `setJoint: unknown option '…' (did you mean '…'?)`; `setJoint: unknown option '…' (the options are type, a, b, anchor, anchorB, axis, min, max, length, cone, target, motorSpeed, motorForce, frictionForce, frequency, dampingRatio, collide)`; `setJoint: a and b can't change; remove the joint and add another`; `setJoint: type must be 'fixed', 'ball', 'hinge', 'slider', 'distance' or 'rotation', got …`; `setJoint: a <type> joint has no <option>`; `setJoint: anchor must be 3 finite numbers, got …`; `setJoint: anchorB must be 3 finite numbers, got …`; `setJoint: axis must be 3 finite numbers, not all zero, got …`; `setJoint: length must be 0 or more, got …`; `setJoint: cone must be an angle from 0 to π, in radians, got …`; `setJoint: target must be from -π to π, in radians, got …`; `setJoint: target must be a finite number, got …`; `setJoint: target must be 4 finite numbers, not all zero, got …`; `setJoint: motorSpeed must be a finite number, got …`; `setJoint: motorForce must be 0 or more, got …`; `setJoint: frictionForce must be 0 or more, got …`; `setJoint: frequency must be 0 or more, got …`; `setJoint: dampingRatio must be 0 or more, got …`; `setJoint: min must be from -π to π, in radians, or -Infinity, got …`; `setJoint: max must be from -π to π, in radians, or Infinity, got …`; `setJoint: min must be a number or -Infinity, got …`; `setJoint: max must be a number or Infinity, got …`; `setJoint: min must be 0 or more, got …`; `setJoint: max must be 0 or more, or Infinity, got …`; `setJoint: min must be at most max (…), got …`; `setJoint: collide must be true or false, got …`.
 
 ```js
 const hinge = world.addJoint({ type: 'hinge', a: crate, anchor: [2, 1, 0], axis: [0, 0, 1] });
@@ -544,11 +624,14 @@ world.setJoint(hinge, { min: -0.5, max: 0.5 });
 world.setJoint(hinge, { min: null });                        // no lower limit again
 world.setJoint(hinge, { target: 0.3, frequency: 2 });        // drive it to 0.3 rad on a 2 Hz spring, up to 500 N·m
 world.setJoint(hinge, { target: null });                     // back to turning at 2 rad/s
+world.setJoint(hinge, world.jointOf(hinge));                 // changes nothing
 ```
 
 Notes: everything follows at once, and the joint's bodies wake. A new `anchor` or `anchorB` is a
 world point where the bodies are now; a new `axis` also counts the joint's angle and position
-from 0 again from here. A new type starts from its own defaults, as a new shape does: the anchors,
+from 0 again from here. An `anchor`, `anchorB` or `axis` given as it already is, as `jointOf`
+reads it, isn't new, and changes nothing. A distance joint given `length: null` is as long as its
+ends are apart now. A new type starts from its own defaults, as a new shape does: the anchors,
 axis and `collide` carry over, and a new distance joint is as long as its ends are apart. A
 joint made to let its bodies collide does so from the next step. A new `target` keeps what the
 motor was pushing with, so a target moved every step, as an animation moves it, is followed
@@ -561,15 +644,16 @@ A copy of the joint's options as they are now, in the form [`addJoint`](#world-a
 so `world.addJoint(world.jointOf(joint))` makes another like it. Changing the result changes
 nothing.
 
-Returns: `{ type, a, b, anchor, anchorB, axis, min, max, length, cone, target, motorSpeed, motorForce, friction, frequency, dampingRatio, collide }`,
+Returns: `{ type, a, b, anchor, anchorB, axis, min, max, length, cone, target, motorSpeed, motorForce, frictionForce, frequency, dampingRatio, collide }`,
 each only for the types that have it: `anchor` where `a`'s end is now, in world space, and
 `anchorB` for a distance joint, or one given it, where `b`'s is; a rotation joint has neither.
-`min` and `max` only if they were given. `target` is `null` for none, a number for a hinge or
-slider, and `[x, y, z, w]`, of unit length, for a ball or rotation joint; one given a `motorSpeed`
-is where Bearing has carried it to. `a` and `b` are [`Body`](#body) handles, `b` `null` for a
-point in the world.
+`axis` as it was last given, made unit length, in world space as it was then. `min` and `max` as
+given, or `null` for the default. `target` is `null` for none, a number for a hinge or slider, and
+`[x, y, z, w]`, of unit length, for a ball or rotation joint; one given a `motorSpeed` is where
+Bearing has carried it to. `a` and `b` are [`Body`](#body) handles, `b` `null` for a point in the
+world.
 
-Throws: `jointOf: this world was destroyed`; `jointOf: joint must be a Joint, got …`; `jointOf: that joint belongs to another world`; `jointOf: this joint was removed`.
+Throws: `jointOf: this world was destroyed`; `jointOf: joint must be a Joint, got …`; `jointOf: joint belongs to another world`; `jointOf: joint was removed`.
 
 ```js
 const swing = world.addJoint({ type: 'hinge', a: crate, anchor: [2, 1, 0], max: 1 });
@@ -578,7 +662,10 @@ console.log(world.jointOf(swing).target);   // null
 ```
 
 Notes: a joint's angle and position count from where it was made, so a copy made where its bodies
-are now counts from there.
+are now counts from there. `axis` isn't read back from how the bodies have turned since, which
+would come back a rounding off what was given and look like a change: it is what was given, so a
+copy made after the bodies have turned has that axis in the world, not the one the bodies have
+carried it to.
 
 <a id="world-raycast"></a>
 ### `world.raycast(origin, direction, options)` → `{ body, point, normal, distance } | null`
@@ -598,7 +685,7 @@ Returns: `{ body, point, normal, distance }` for the nearest hit, or `null`. `bo
 direction there (unit length, facing back at the ray), and `distance` how far along the ray, in
 metres. The arrays are fresh copies, and `body` is a handle that can be kept.
 
-Throws: `raycast: this world was destroyed`; `raycast: origin must be 3 finite numbers, got …`; `raycast: direction must be 3 finite numbers, not all zero, got …`; `raycast: options must be an object, got …`; `raycast: unknown option '…' (did you mean '…'?)`; `raycast: unknown option '…' (the options are maxDistance, mask, ignore)`; `raycast: maxDistance must be 0 or more, got …`; `raycast: mask must be a whole number that fits in 32 bits, got …`; `raycast: ignore must be a Body of this world, got …`.
+Throws: `raycast: this world was destroyed`; `raycast: origin must be 3 finite numbers, got …`; `raycast: direction must be 3 finite numbers, not all zero, got …`; `raycast: options must be an object, got …`; `raycast: unknown option '…' (did you mean '…'?)`; `raycast: unknown option '…' (the options are maxDistance, mask, ignore)`; `raycast: maxDistance must be 0 or more, got …`; `raycast: mask must be a whole number that fits in 32 bits, got …`; `raycast: ignore must be a Body, got …`; `raycast: ignore belongs to another world`; `raycast: ignore was removed`.
 
 ```js
 const below = world.raycast(player.position, [0, -1, 0], { maxDistance: 2, ignore: player });
@@ -625,7 +712,7 @@ other way, with the same options.
 Returns: an array of `{ body, point, normal, distance }`, nearest first; `[]` if none. Two bodies
 met at the same distance come in the order they were added.
 
-Throws: `raycastAll: this world was destroyed`; `raycastAll: origin must be 3 finite numbers, got …`; `raycastAll: direction must be 3 finite numbers, not all zero, got …`; `raycastAll: options must be an object, got …`; `raycastAll: unknown option '…' (did you mean '…'?)`; `raycastAll: unknown option '…' (the options are maxDistance, mask, ignore)`; `raycastAll: maxDistance must be 0 or more, got …`; `raycastAll: mask must be a whole number that fits in 32 bits, got …`; `raycastAll: ignore must be a Body of this world, got …`.
+Throws: `raycastAll: this world was destroyed`; `raycastAll: origin must be 3 finite numbers, got …`; `raycastAll: direction must be 3 finite numbers, not all zero, got …`; `raycastAll: options must be an object, got …`; `raycastAll: unknown option '…' (did you mean '…'?)`; `raycastAll: unknown option '…' (the options are maxDistance, mask, ignore)`; `raycastAll: maxDistance must be 0 or more, got …`; `raycastAll: mask must be a whole number that fits in 32 bits, got …`; `raycastAll: ignore must be a Body, got …`; `raycastAll: ignore belongs to another world`; `raycastAll: ignore was removed`.
 
 ```js
 for (const hit of world.raycastAll([0, 20, 0], [0, -1, 0])) console.log(hit.body.id, hit.distance);
@@ -652,7 +739,7 @@ Returns: `{ body, point, normal, distance }` for the first touch, or `null`. `di
 the shape slid before touching, in metres; `point` is where it touches the body, on the body's
 surface; `normal` is the body's surface direction there, facing back at the shape.
 
-Throws: `shapeCast: this world was destroyed`; `shapeCast: shape must be an object, got …`; `shapeCast: unknown option '…' (did you mean '…'?)`; `shapeCast: unknown option '…' (the options are shape, size, radius, height)`; `shapeCast: shape must be 'box', 'sphere' or 'capsule', got …`; `shapeCast: a <shape> has no <option>`; `shapeCast: size must be 3 positive numbers, got …`; `shapeCast: radius must be a positive number, got …`; `shapeCast: height must be a positive number, got …`; `shapeCast: height must be at least twice radius (…), got …`; `shapeCast: origin must be 3 finite numbers, got …`; `shapeCast: direction must be 3 finite numbers, not all zero, got …`; `shapeCast: options must be an object, got …`; `shapeCast: unknown option '…' (the options are maxDistance, mask, ignore, rotation)`; `shapeCast: maxDistance must be 0 or more, got …`; `shapeCast: mask must be a whole number that fits in 32 bits, got …`; `shapeCast: ignore must be a Body of this world, got …`; `shapeCast: rotation must be 4 finite numbers, not all zero, got …`.
+Throws: `shapeCast: this world was destroyed`; `shapeCast: shape must be an object, got …`; `shapeCast: shape: unknown option '…' (did you mean '…'?)`; `shapeCast: shape: unknown option '…' (the options are shape, size, radius, height)`; `shapeCast: shape.shape must be 'box', 'sphere' or 'capsule', got …`; `shapeCast: shape: a <shape> has no <option>`; `shapeCast: shape.size must be 3 positive numbers, got …`; `shapeCast: shape.radius must be a positive number, got …`; `shapeCast: shape.height must be a positive number, got …`; `shapeCast: shape.height must be at least twice radius (…), got …`; `shapeCast: origin must be 3 finite numbers, got …`; `shapeCast: direction must be 3 finite numbers, not all zero, got …`; `shapeCast: options must be an object, got …`; `shapeCast: unknown option '…' (did you mean '…'?)`; `shapeCast: unknown option '…' (the options are maxDistance, mask, ignore, rotation)`; `shapeCast: maxDistance must be 0 or more, got …`; `shapeCast: mask must be a whole number that fits in 32 bits, got …`; `shapeCast: ignore must be a Body, got …`; `shapeCast: ignore belongs to another world`; `shapeCast: ignore was removed`; `shapeCast: rotation must be 4 finite numbers, not all zero, got …`.
 
 ```js
 // How far can the player step forward before walking into something?
@@ -678,7 +765,7 @@ Finds every body a shape placed at `position` overlaps or touches. `shape` is as
 
 Returns: an array of [`Body`](#body), in no particular order; `[]` if none.
 
-Throws: `overlap: this world was destroyed`; `overlap: shape must be an object, got …`; `overlap: unknown option '…' (did you mean '…'?)`; `overlap: unknown option '…' (the options are shape, size, radius, height)`; `overlap: shape must be 'box', 'sphere' or 'capsule', got …`; `overlap: a <shape> has no <option>`; `overlap: size must be 3 positive numbers, got …`; `overlap: radius must be a positive number, got …`; `overlap: height must be a positive number, got …`; `overlap: height must be at least twice radius (…), got …`; `overlap: position must be 3 finite numbers, got …`; `overlap: options must be an object, got …`; `overlap: unknown option '…' (the options are mask, ignore, rotation)`; `overlap: mask must be a whole number that fits in 32 bits, got …`; `overlap: ignore must be a Body of this world, got …`; `overlap: rotation must be 4 finite numbers, not all zero, got …`.
+Throws: `overlap: this world was destroyed`; `overlap: shape must be an object, got …`; `overlap: shape: unknown option '…' (did you mean '…'?)`; `overlap: shape: unknown option '…' (the options are shape, size, radius, height)`; `overlap: shape.shape must be 'box', 'sphere' or 'capsule', got …`; `overlap: shape: a <shape> has no <option>`; `overlap: shape.size must be 3 positive numbers, got …`; `overlap: shape.radius must be a positive number, got …`; `overlap: shape.height must be a positive number, got …`; `overlap: shape.height must be at least twice radius (…), got …`; `overlap: position must be 3 finite numbers, got …`; `overlap: options must be an object, got …`; `overlap: unknown option '…' (did you mean '…'?)`; `overlap: unknown option '…' (the options are mask, ignore, rotation)`; `overlap: mask must be a whole number that fits in 32 bits, got …`; `overlap: ignore must be a Body, got …`; `overlap: ignore belongs to another world`; `overlap: ignore was removed`; `overlap: rotation must be 4 finite numbers, not all zero, got …`.
 
 ```js
 const blast = [0, 1, 0];   // where an explosion went off
@@ -686,7 +773,7 @@ for (const body of world.overlap({ shape: 'sphere', radius: 4 }, blast)) body.ap
 ```
 
 <a id="world-contacts"></a>
-### `world.contacts(body)` → `Array`
+### `world.contacts(body?)` → `Array`
 
 The last step's contact events: which pairs of bodies began touching in it, and which stopped. Read
 it after each step, in the same place you step. Given a body, only that body's events, each turned
@@ -699,7 +786,7 @@ towards `b` there, both world-space arrays of 3, and `speed` is how fast they cl
 when they met, in m/s, 0 or more: for the loudness of a sound, or damage. An end is
 `{ type: 'end', a, b }`. `[]` before the first step, and after a step in which nothing changed.
 
-Throws: `contacts: this world was destroyed`; `contacts: body must be a Body, got …`; `contacts: that body belongs to another world`.
+Throws: `contacts: this world was destroyed`; `contacts: body must be a Body, got …`; `contacts: body belongs to another world`.
 
 ```js
 world.step(1 / 60);
@@ -725,7 +812,7 @@ Returns: `{ body, point, normal }`, or `null` while it is in the air. `body` is 
 under it, `point` where it stands on it, and `normal` that ground's unit direction up out of it
 there, world-space arrays of 3, fresh copies. `null` for a body that isn't a character.
 
-Throws: `groundOf: this world was destroyed`; `groundOf: body must be a Body, got …`; `groundOf: that body belongs to another world`; `groundOf: this body was removed`.
+Throws: `groundOf: this world was destroyed`; `groundOf: body must be a Body, got …`; `groundOf: body belongs to another world`; `groundOf: body was removed`.
 
 ```js
 const hero = world.addBody({ type: 'character', shape: 'capsule', radius: 0.3, height: 1.8, position: [0, 0.9, 0] });
@@ -747,7 +834,7 @@ sensor. What `begin` and `end` events say, asked at any time: "is the player on 
 
 Returns: an array of [`Body`](#body), in the same order every run; `[]` if none.
 
-Throws: `touching: this world was destroyed`; `touching: body must be a Body, got …`; `touching: that body belongs to another world`; `touching: this body was removed`.
+Throws: `touching: this world was destroyed`; `touching: body must be a Body, got …`; `touching: body belongs to another world`; `touching: body was removed`.
 
 ```js
 const grounded = world.touching(player).length > 0;
@@ -819,8 +906,8 @@ events. With less, a loaded pile would start without the impulses holding it and
 drift from the saved one. So it is large: a heap of 1,000 boxes dropped turned is about 7 MB of
 JSON once it has settled and 10 to 11 MB while it lands, and takes a tenth of a second or so to
 save or to load (i7-1260P, Node 22). Numbers JSON can't hold, NaN, ±Infinity and -0, are written as strings,
-so JSON carries every bit. The data's layout follows Bearing's own, and says which in its
-`format`: data saved by another version of Bearing may not load (see
+so JSON carries every bit. The data's layout follows Bearing's own, so it says which version of
+Bearing saved it, as `version`, and loads only into that version (see
 [`World.load`](#world-load)).
 
 <a id="world-load"></a>
@@ -833,7 +920,7 @@ stepping exactly as the saved world would have.
 Returns: a new [`World`](#world), its own: changing it changes nothing in the world it was saved
 from, or the data.
 
-Throws: `load: data must be what world.save() returned, got …`; `load: data is format …; this Bearing reads format 9`; `load: data is damaged: …`.
+Throws: `load: data must be what world.save() returned, got …`; `load: this data was saved by …, and this is …; a save loads only into the version that made it`; `load: data is format …; this Bearing reads format 10`; `load: data is damaged: …`.
 
 ```js
 const checkpoint = world.save();
@@ -841,9 +928,13 @@ const checkpoint = world.save();
 const world2 = World.load(checkpoint);
 ```
 
-Notes: `format` is the layout of the data, which changes when Bearing's stored state does; data
-of another format throws rather than load as something subtly different. Handles from the saved
-world belong to it: take the loaded world's own from `world.body(id)` with the same ids.
+Notes: a save loads only into the version of Bearing that made it, named by its `version`. Another
+version may keep its state differently, and steps differently, so data from it would load as
+something subtly wrong, or step its own way: it throws instead. Keep a replay or a bug report with
+the version that saved it; to carry a level to a new version, build it again from what
+[`bodyOf`](#world-bodyof) and [`jointOf`](#world-jointof) give. `format`, the layout of the data,
+guards the same between releases. Handles from the saved world belong to it: take the loaded
+world's own from `world.body(id)` and `world.joint(id)` with the same ids.
 
 <a id="world-debuglines"></a>
 ### `world.debugLines(options)` → `Float32Array`
@@ -856,7 +947,7 @@ data.
 |---|---|---|
 | `shapes` | `true` | Every body's collision shape: a box's 12 edges, a ball's 3 rings, a capsule's rings and sides, a hull's edges, a compound's parts, a mesh's or heightfield's triangles. Awake bodies blue, asleep dimmer, static grey, kinematic purple, characters green, sensors yellow. |
 | `contacts` | `true` | The last step's contact points, each a red line out along its normal (from `a` towards `b`) a quarter of the smaller body's thinnest size long. |
-| `joints` | `true` | Each joint, orange: a line from each body's centre to its anchor on that body; a rotation joint's, which has no anchor, between its bodies' centres, and none to the world. |
+| `joints` | `true` | Each joint, orange: a line from each body's centre of mass to its anchor on that body; a rotation joint's, which has no anchor, between its bodies' centres of mass, and none to the world. |
 | `boxes` | `false` | The boxes the broadphase files each body in, which it is filed again on leaving. |
 
 Returns: a `Float32Array`, a view of the world's own array, which the next call replaces: copy it
@@ -899,7 +990,9 @@ A Body is a handle to one body in a world. It holds nothing itself: `body.world`
 `body.id` its id, and the data lives in the world. Two Body objects can name the same body, so
 compare `a.id === b.id`, not `a === b`. You never make one with `new`;
 [`world.addBody`](#world-addbody) and [`world.body`](#world-body) do. Once the body is removed,
-every method and reading below throws `<call>: this body was removed`.
+`id`, `world`, `alive` and `destroy()` still work, and so does `slot`, though by then it may
+belong to another body; every other method and reading throws, saying the body was removed
+(`setPosition: this body was removed`, `body.position: this body was removed`).
 
 <a id="body-id"></a>
 ### `body.id` → `number`
@@ -914,7 +1007,8 @@ const players = new Map([[ball.id, 'Ana']]);
 ```
 
 Notes: an id is the body's slot plus 2^24 times how many times that slot has been used, which
-fits a JavaScript number exactly (below 2^53). See [Limits](#limits).
+fits a JavaScript number exactly (below 2^53). See [Limits](#limits). How an id is laid out isn't
+promised beyond that ([What 1.x promises](#promises)).
 
 <a id="body-slot"></a>
 ### `body.slot` → `number`
@@ -962,7 +1056,7 @@ if (ball.alive) ball.setVelocity(0, 5, 0);
 static body never is, and nor is a frozen one, stopped while the rest of its island moves. Read
 only: a body is woken by whatever disturbs it, never by hand. See [Sleeping](#sleeping).
 
-Throws: `asleep: this world was destroyed`; `asleep: this body was removed`; `body.asleep is read only`.
+Throws: `body.asleep: this world was destroyed`; `body.asleep: this body was removed`; `body.asleep is read only`.
 
 ```js
 if (crate.asleep) console.log('the crate has settled');
@@ -974,7 +1068,7 @@ if (crate.asleep) console.log('the crate has settled');
 The body's mass in kg: the one it was given, or its density times its shape's volume. Read only;
 change it with [`setBody`](#world-setbody).
 
-Throws: `mass: this world was destroyed`; `mass: this body was removed`; `body.mass is read only; use setBody(body, { mass })`.
+Throws: `body.mass: this world was destroyed`; `body.mass: this body was removed`; `body.mass is read only; use setBody(body, { mass })`.
 
 ```js
 console.log(ball.mass);   // 523.6 for a 0.5 m ball of water
@@ -992,7 +1086,7 @@ are its own x, y and z axes; for a hull or compound, its principal axes (see
 [Hulls and compounds](#hulls)). Worked out from the shape and mass, or the `inertia` it was given.
 Read only; change it with [`setBody`](#world-setbody).
 
-Throws: `inertia: this world was destroyed`; `inertia: this body was removed`; `body.inertia is read only; use setBody(body, { inertia })`.
+Throws: `body.inertia: this world was destroyed`; `body.inertia: this body was removed`; `body.inertia is read only; use setBody(body, { inertia })`.
 
 ```js
 const [ix, iy, iz] = crate.inertia;   // 166.7 each, for a 1 m box of water
@@ -1007,9 +1101,9 @@ its parts about its centre.
 
 Where the body's origin is, in metres, as a frozen copy: a box's, ball's or capsule's centre, and
 the point a hull's points and a compound's parts are given from. Where its mass is centred is
-[`centerOfMass`](#body-centerofmass). Read only; move it with [`setPosition`](#body-setposition).
+[`worldCenterOfMass`](#body-worldcenterofmass). Read only; move it with [`setPosition`](#body-setposition).
 
-Throws: `position: this world was destroyed`; `position: this body was removed`; `body.position is read only; use setPosition(x, y, z)`.
+Throws: `body.position: this world was destroyed`; `body.position: this body was removed`; `body.position is read only; use setPosition(x, y, z)`.
 
 ```js
 if (ball.position[1] < -100) ball.setPosition(0, 5, 0);
@@ -1018,22 +1112,22 @@ if (ball.position[1] < -100) ball.setPosition(0, 5, 0);
 Notes: frozen, so `ball.position[1] = 5` throws in a module rather than changing a copy for
 nothing. For many bodies at once, read [`world.transforms`](#world-transforms).
 
-<a id="body-centerofmass"></a>
-### `body.centerOfMass` → `[x, y, z]`
+<a id="body-worldcenterofmass"></a>
+### `body.worldCenterOfMass` → `[x, y, z]`
 
 Where the body's mass is centred, in the world, in metres, as a frozen copy: the point it turns
 about, and the point its `velocity` is the velocity of. The same as `position` for a box, ball or
-capsule unless it was given a `centerOfMass`. Read only; move it with
-[`setBody`](#world-setbody).
+capsule unless it was given a `centerOfMass`, which is the same point in the body's own frame.
+Read only; move it with [`setBody`](#world-setbody)'s `centerOfMass`.
 
-Throws: `centerOfMass: this world was destroyed`; `centerOfMass: this body was removed`; `body.centerOfMass is read only; use setBody(body, { centerOfMass })`.
+Throws: `body.worldCenterOfMass: this world was destroyed`; `body.worldCenterOfMass: this body was removed`; `body.worldCenterOfMass is read only; use setBody(body, { centerOfMass })`.
 
 ```js
 const hammer = world.addBody({
   shape: 'compound',
   parts: [{ shape: 'capsule', radius: 0.02, height: 0.3 }, { size: [0.12, 0.04, 0.04], position: [0, 0.16, 0], density: 7800 }],
 });
-console.log(hammer.centerOfMass);   // [0, 0.129, 0]: most of its mass is in the head
+console.log(hammer.worldCenterOfMass);   // [0, 0.129, 0]: most of its mass is in the head
 ```
 
 <a id="body-rotation"></a>
@@ -1043,7 +1137,7 @@ The body's rotation as a unit quaternion, a frozen copy. Read only; turn it with
 [`setRotation`](#body-setrotation), [`setAxisAngle`](#body-setaxisangle) or
 [`setEuler`](#body-seteuler).
 
-Throws: `rotation: this world was destroyed`; `rotation: this body was removed`; `body.rotation is read only; use setRotation(q)`.
+Throws: `body.rotation: this world was destroyed`; `body.rotation: this body was removed`; `body.rotation is read only; use setRotation(q)`.
 
 ```js
 const [x, y, z, w] = ball.rotation;
@@ -1052,10 +1146,11 @@ const [x, y, z, w] = ball.rotation;
 <a id="body-velocity"></a>
 ### `body.velocity` → `[x, y, z]`
 
-The body's velocity in m/s, a frozen copy. Read only; change it with
+How fast the body's centre of mass moves, in m/s, a frozen copy: for a box, ball or capsule, its
+centre, unless it was given a `centerOfMass`. Read only; change it with
 [`setVelocity`](#body-setvelocity). Always zero for a static body.
 
-Throws: `velocity: this world was destroyed`; `velocity: this body was removed`; `body.velocity is read only; use setVelocity(x, y, z)`.
+Throws: `body.velocity: this world was destroyed`; `body.velocity: this body was removed`; `body.velocity is read only; use setVelocity(x, y, z)`.
 
 ```js
 const [vx, vy, vz] = ball.velocity;
@@ -1068,7 +1163,7 @@ const speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
 How fast the body turns about each world axis, in rad/s, a frozen copy. Read only; change it
 with [`setAngularVelocity`](#body-setangularvelocity). Always zero for a static body.
 
-Throws: `angularVelocity: this world was destroyed`; `angularVelocity: this body was removed`; `body.angularVelocity is read only; use setAngularVelocity(x, y, z)`.
+Throws: `body.angularVelocity: this world was destroyed`; `body.angularVelocity: this body was removed`; `body.angularVelocity is read only; use setAngularVelocity(x, y, z)`.
 
 ```js
 const spin = ball.angularVelocity[1];   // about Y
@@ -1077,7 +1172,7 @@ const spin = ball.angularVelocity[1];   // about Y
 <a id="body-setposition"></a>
 ### `body.setPosition(x, y, z)` → `Body`
 
-Moves the body's centre to (x, y, z), in metres, at once.
+Moves the body's origin, where [`position`](#body-position) is, to (x, y, z), in metres, at once.
 
 Throws: `setPosition: this world was destroyed`; `setPosition: this body was removed`; `setPosition: x, y and z must be finite numbers, got …`.
 
@@ -1137,7 +1232,7 @@ the angles aren't kept, so reading back gives [`rotation`](#body-rotation).
 <a id="body-setvelocity"></a>
 ### `body.setVelocity(x, y, z)` → `Body`
 
-Sets the body's velocity, in m/s.
+Sets how fast the body's centre of mass moves, in m/s.
 
 Throws: `setVelocity: this world was destroyed`; `setVelocity: this body was removed`; `setVelocity: x, y and z must be finite numbers, got …`; `setVelocity: a static body has no velocity`.
 
@@ -1167,7 +1262,7 @@ only the free axes are set.
 
 Pushes the body with `force`, in newtons, for the next [`step`](#world-step), after which it is
 cleared. Applied at `point`, in world space and metres, it turns the body too; left out, it acts
-through the body's centre. Several forces before one step add up.
+through the body's centre of mass, and turns nothing. Several forces before one step add up.
 
 Throws: `applyForce: this world was destroyed`; `applyForce: this body was removed`; `applyForce: force must be 3 finite numbers, got …`; `applyForce: point must be 3 finite numbers, got …`.
 
@@ -1203,7 +1298,7 @@ character body. A body's [`lockRotation`](#world-addbody) axes take nothing.
 
 Changes the body's velocity at once, by `impulse` in newton-seconds divided by its mass: a kick, a
 hit, a jump. Applied at `point`, in world space and metres, it changes the angular velocity too;
-left out, it acts through the body's centre.
+left out, it acts through the body's centre of mass, and turns nothing.
 
 Throws: `applyImpulse: this world was destroyed`; `applyImpulse: this body was removed`; `applyImpulse: impulse must be 3 finite numbers, got …`; `applyImpulse: point must be 3 finite numbers, got …`.
 
@@ -1246,7 +1341,7 @@ crate.destroy();
 
 A Joint is a handle to one joint in a world, as a [`Body`](#body) is to a body: `joint.world` is
 its world and `joint.id` its id, and nothing else. Compare `a.id === b.id`, not `a === b`.
-[`world.addJoint`](#world-addjoint) makes one. Change it with [`world.setJoint`](#world-setjoint),
+[`world.addJoint`](#world-addjoint) and [`world.joint`](#world-joint) make one. Change it with [`world.setJoint`](#world-setjoint),
 read it with [`world.jointOf`](#world-jointof), and what it held over the last step with
 [`joint.force`](#joint-force) and [`joint.torque`](#joint-torque).
 
@@ -1298,7 +1393,7 @@ its bodies together, its stops, its motor and drive, its friction and its spring
 [`step`](#world-step), as [`world.contacts()`](#world-contacts) are, to break a joint that is
 pulled too hard: remove it. Read only.
 
-Throws: `force: this world was destroyed`; `force: this joint was removed`; `joint.force is read only`.
+Throws: `joint.force: this world was destroyed`; `joint.force: this joint was removed`; `joint.force is read only`.
 
 ```js
 const head = world.addBody({ shape: 'sphere', radius: 0.12, position: [0, 1.7, 0] });
@@ -1324,7 +1419,7 @@ The torque the joint turned `a` with over the last step, in N·m, world space, a
 to `a`; a ball or distance joint, which holds a point, has none but what its friction, stops and
 drive add. Read only.
 
-Throws: `torque: this world was destroyed`; `torque: this joint was removed`; `joint.torque is read only`.
+Throws: `joint.torque: this world was destroyed`; `joint.torque: this joint was removed`; `joint.torque is read only`.
 
 ```js
 const shelf = world.addBody({ size: [1, 0.05, 0.3], position: [0.5, 1, 0], mass: 10 });
@@ -1394,7 +1489,7 @@ const hammer = world.addBody({
   compound's from its parts' masses. A thrown hammer turns about a point near its head, and its
   handle swings round it. `position` and [`world.transforms`](#world-transforms) stay at the
   body's origin, where its points and parts are measured from, so a renderer draws a model where
-  its own file puts it; [`centerOfMass`](#body-centerofmass) says where its mass is.
+  its own file puts it; [`worldCenterOfMass`](#body-worldcenterofmass) says where its mass is.
 - **Its inertia is about its principal axes.** A lopsided shape's inertia isn't three numbers
   about its own axes, but it is about three others at right angles, its principal axes, the ones
   it spins about steadily. Bearing finds them when the body is made (Jacobi's method, from square
@@ -1730,11 +1825,11 @@ A joint takes some away, and leaves the rest:
   instead and may give, and `cone` stops `axis` swinging further than that from where it was, so a
   ragdoll's chest can be kept upright against the world without pinning it to a point, and never
   tip more than its cone. With no motor and no friction it holds exactly and its `cone` has nothing
-  to stop; with `friction` it holds up to that torque and then turns, slowed.
-- **Friction stops a joint swinging.** `friction` resists `a` turning (or sliding) against `b`,
+  to stop; with `frictionForce` it holds up to that torque and then turns, slowed.
+- **Friction stops a joint swinging.** `frictionForce` resists `a` turning (or sliding) against `b`,
   up to that torque (or force) and no more, as a stiff hinge does: a joint loaded less than that
   holds still, and one loaded more turns, slowed. A hinge's or slider's is its motor held at speed
-  0, so `friction: F` acts exactly as `motorSpeed: 0, motorForce: F` would, and a motor that is on
+  0, so `frictionForce: F` acts exactly as `motorSpeed: 0, motorForce: F` would, and a motor that is on
   already resists up to its own force. A ball joint's resists turning every way alike, however the
   joint is turned. 32 ragdolls with 1 N·m on every joint all sleep within 6 s; with none, most of
   them still swing at 12 s. None by default, as in most engines.
@@ -1775,7 +1870,7 @@ divides by nothing where a body can't move along some row: far too little to see
 joint turning very fast opens a little within a step and closes again: a chain's end whipped to
 hundreds of radians a second opened 7.5 mm for a moment. A body hanging from a dangling joint with
 nothing to rub on swings for as long as a pendulum would: to settle, give its joint some
-`friction`, or the body some [`angularDamping`](#world-addbody). A spring (a distance joint's,
+`frictionForce`, or the body some [`angularDamping`](#world-addbody). A spring (a distance joint's,
 or a drive's) bounces at its `frequency` to within 0.2% at up to 5 Hz, but solved in steps it
 loses some swing even at `dampingRatio: 0`, the more the stiffer: about 8% a second at 1 Hz and
 87% at 5 Hz, with the default 8 substeps at 60 steps a second (more substeps lose less). A stiff
@@ -1987,3 +2082,28 @@ most half a turn a step, π / dt rad/s (188 rad/s at 60 Hz). See [Contacts](#con
 A slot can be reused 536,870,911 times (2^29 − 1) before it is retired and never handed out
 again, so no old id can ever match a new body. Reused once a step at 60 Hz, that is 280 years, so
 in practice a world never retires one.
+
+<a id="renamed"></a>
+## Renamed
+
+Names that changed, for code written against an earlier version, and what each is called now.
+Before 1.0, a renamed option or property throws, saying what it is called now. From 1.0, a name
+renamed in a 1.x version keeps working until 2.0 (see [What 1.x promises](#promises)), and is
+listed here.
+
+| Was | Is |
+|---|---|
+| `body.centerOfMass`, where the mass is centred in the world | [`body.worldCenterOfMass`](#body-worldcenterofmass), as Winding's is `node.worldPosition()`. The [`centerOfMass` option](#world-addbody), in the body's own frame, keeps its name. |
+| a joint's `friction` | [`frictionForce`](#world-addjoint), the same N·m or N, paired with `motorForce`. A body's `friction`, a coefficient, keeps its name. |
+
+<a id="body-centerofmass"></a>
+### `body.centerOfMass`
+
+Now [`body.worldCenterOfMass`](#body-worldcenterofmass), so that `centerOfMass` means one point
+in one frame: the option's, in the body's own. Reading or assigning it throws.
+
+Throws: `body.centerOfMass is now body.worldCenterOfMass (world space); the centerOfMass option is in the body's own frame`.
+
+```js
+const [x, y, z] = crate.worldCenterOfMass;   // was crate.centerOfMass
+```

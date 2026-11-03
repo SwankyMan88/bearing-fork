@@ -94,7 +94,7 @@ const ENGINES = {
       }
       return {
         step: () => world.step(DT),
-        position: (i) => bodies[i].centerOfMass,
+        position: (i) => bodies[i].worldCenterOfMass,
         rotation: (i) => bodies[i].rotation,
         asleep: () => bodies.reduce((n, b) => n + (b.asleep ? 1 : 0), 0),
         mass: () => bodies[0].mass,

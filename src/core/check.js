@@ -25,6 +25,22 @@ export function readOnly(name, hint) {
   throw new Error(hint ? `${name} is read only; use ${hint}` : `${name} is read only`);
 }
 
+/**
+ * A handle a call was given, as `name`: its slot in `slots`, or -1 for one
+ * removed where `gone` allows that (remove() and contacts() take a removed
+ * body). Every call that takes a Body or a Joint checks it here, so a bad
+ * handle reads the same everywhere: `setBody: body was removed`,
+ * `addJoint: b belongs to another world`, `raycast: ignore must be a Body, got 7`.
+ * A handle's own methods and properties say `this body was removed` instead.
+ */
+export function handle(caller, name, value, world, Kind, slots, gone = false) {
+  if (!(value instanceof Kind)) fail(caller, `${name} must be a ${Kind.name}, got ${show(value)}`);
+  if (value.world !== world) fail(caller, `${name} belongs to another world`);
+  const s = slots.slotOf(value.id);
+  if (s < 0 && !gone) fail(caller, `${name} was removed`);
+  return s;
+}
+
 /** How a bad value reads in a message: arrays as 1,NaN,0 (Winding's form), strings quoted. */
 export function show(value) {
   if (typeof value === 'string') return `'${value}'`;

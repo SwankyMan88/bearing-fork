@@ -73,7 +73,7 @@ test("a hull of a box\'s corners weighs and turns as the box, to rounding", () =
   near(hull.mass, box.mass, 1e-12 * box.mass, 'mass');
   for (let k = 0; k < 3; k++) {
     near(hull.inertia[k], box.inertia[k], 1e-12 * box.inertia[k], `inertia ${k}`);
-    near(hull.centerOfMass[k], box.centerOfMass[k], 1e-14, `centre ${k}`);
+    near(hull.worldCenterOfMass[k], box.worldCenterOfMass[k], 1e-14, `centre ${k}`);
   }
   assert.deepEqual(hull.position, [2, 0, 0]);
 });
@@ -82,7 +82,7 @@ test("a tetrahedron has its formulas: volume 1/6, centre at the corners\' mean, 
   const world = new World();
   const t = world.addBody({ shape: 'hull', vertices: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1] });
   near(t.mass, 1000 / 6, 1e-12, 'mass');
-  for (let k = 0; k < 3; k++) near(t.centerOfMass[k], 0.25, 1e-15, `centre ${k}`);
+  for (let k = 0; k < 3; k++) near(t.worldCenterOfMass[k], 0.25, 1e-15, `centre ${k}`);
   const moments = [...t.inertia].sort((a, b) => a - b);
   near(moments[0], 1000 / 96, 1e-12, 'least');
   near(moments[1], 1000 / 96, 1e-12, 'middle');
@@ -154,7 +154,7 @@ test("an irregular hull\'s mass, centre and principal moments match integration 
   const want = sliced(build(points), 4000);
   near(body.mass, want.V, 1e-3 * want.V, 'mass');
   const size = Math.cbrt(want.V);
-  for (let k = 0; k < 3; k++) near(body.centerOfMass[k], want.c[k], 1e-3 * size, `centre ${k}`);
+  for (let k = 0; k < 3; k++) near(body.worldCenterOfMass[k], want.c[k], 1e-3 * size, `centre ${k}`);
   const got = [...body.inertia].sort((a, b) => a - b), moments = eigenvalues(want.I);
   for (let k = 0; k < 3; k++) near(got[k], moments[k], 1e-3 * moments[k], `moment ${k}`);
 });
@@ -163,7 +163,7 @@ test('a compound of two boxes has their masses summed, the weighted centre, and 
   const world = new World();
   const c = world.addBody({ shape: 'compound', parts: [{ size: [1, 1, 1] }, { size: [1, 1, 1], position: [2, 0, 0], density: 3000 }] });
   near(c.mass, 4000, 1e-9, 'mass');
-  near(c.centerOfMass[0], 1.5, 1e-14, 'centre x');
+  near(c.worldCenterOfMass[0], 1.5, 1e-14, 'centre x');
   // About y: each box's own m/6, and m d² from the shared centre, 1.5 and 0.5 away.
   const iy = 1000 / 6 + 1000 * 1.5 * 1.5 + 3000 / 6 + 3000 * 0.5 * 0.5;
   const ix = 4000 / 6;
@@ -174,7 +174,7 @@ test('a compound of two boxes has their masses summed, the weighted centre, and 
   // A mass given scales every part to it.
   world.setBody(c, { mass: 400 });
   near(c.mass, 400, 1e-12, 'given mass');
-  near(c.centerOfMass[0], 1.5, 1e-14, 'centre, scaled');
+  near(c.worldCenterOfMass[0], 1.5, 1e-14, 'centre, scaled');
   near([...c.inertia].sort((a, b) => a - b)[1], iy / 10, 1e-9, 'inertia, scaled');
 });
 
@@ -259,7 +259,7 @@ test('a rock lying across another rock\'s edge comes to rest: the four points ke
       }
       assert.ok(top.asleep, `pose ${i}${afresh ? ' found afresh' : ''}: still moving at ${Math.hypot(...top.velocity)} m/s`);
       // On the lower rock, where it landed a few millimetres below where it started.
-      near(top.centerOfMass[1], pose.rests, 0.01, `pose ${i}: its centre's height`);
+      near(top.worldCenterOfMass[1], pose.rests, 0.01, `pose ${i}: its centre's height`);
     }
   }
 });
@@ -344,7 +344,7 @@ test('a pile of irregular hulls lands on a box, a ball, a capsule, a mesh and a 
   }
   for (let n = 0; n < 20 * 60; n++) world.step(DT);
   assert.ok(bodies.every((b) => b.asleep), `${bodies.filter((b) => b.asleep).length} of 48 asleep`);
-  assert.ok(bodies.every((b) => b.centerOfMass[1] > 0), 'one fell through');
+  assert.ok(bodies.every((b) => b.worldCenterOfMass[1] > 0), 'one fell through');
 });
 
 test('a hammer thrown in zero gravity turns about its centre of mass, which flies straight, and keeps its momentum exactly', () => {
@@ -354,7 +354,7 @@ test('a hammer thrown in zero gravity turns about its centre of mass, which flie
     parts: [{ shape: 'capsule', radius: 0.02, height: 0.3, density: 700 }, { size: [0.12, 0.04, 0.04], position: [0, 0.16, 0], density: 7800 }],
     velocity: [1, 0, 0], angularVelocity: [3, 1, 20],
   });
-  const c0 = hammer.centerOfMass;
+  const c0 = hammer.worldCenterOfMass;
   const energy = () => {
     // Its angular momentum, from the world's own state: I ω in the principal frame.
     const w = hammer.angularVelocity, I = hammer.inertia, q = world._rotation.subarray(0, 4);
@@ -367,12 +367,12 @@ test('a hammer thrown in zero gravity turns about its centre of mass, which flie
   const start = energy();
   for (let n = 1; n <= 240; n++) {
     world.step(DT);
-    const c = hammer.centerOfMass, now = energy();
+    const c = hammer.worldCenterOfMass, now = energy();
     near(Math.hypot(c[0] - (c0[0] + n * DT), c[1] - c0[1], c[2] - c0[2]), 0, 1e-12, `centre off its line at step ${n}`);
     for (let k = 0; k < 3; k++) near(now.L[k], start.L[k], 1e-9 * Math.hypot(...start.L), `angular momentum ${k} at step ${n}`);
   }
   // The origin, at the handle's middle, swings round the centre of mass as the hammer turns.
-  const off = hammer.position.map((x, k) => x - hammer.centerOfMass[k]);
+  const off = hammer.position.map((x, k) => x - hammer.worldCenterOfMass[k]);
   near(Math.hypot(...off), Math.hypot(c0[0], c0[1], c0[2]), 1e-12, 'origin to centre');
 });
 
@@ -383,7 +383,7 @@ test('an L-shaped compound stands while its centre of mass is over its foot, and
     world.addBody({ type: 'static', size: [10, 1, 10], position: [0, -0.5, 0] });
     const body = world.addBody({ shape: 'compound', parts: [{ size: [0.2, 1, 0.2] }, { size: [arm, 0.2, 0.2], position: [0.1 + arm / 2, 0.4, 0] }], position: [0, 0.5, 0] });
     for (let n = 0; n < 300; n++) world.step(DT);
-    return { x: body.centerOfMass[0], fell: Math.abs(body.rotation[2]) > 0.2 };
+    return { x: body.worldCenterOfMass[0], fell: Math.abs(body.rotation[2]) > 0.2 };
   };
   // Centre of mass 5 mm inside the edge, then 5 mm past it: L (0.1 + L/2) = c (1 + L).
   assert.equal(fall(0.43092).fell, false);
@@ -427,21 +427,21 @@ test('position and transforms stay at the origin; centerOfMass moves the turn, a
   assert.deepEqual([...rock.position], [5, 1, 0]);
   near(rock.rotation[1], 0.3826834, 1e-7, 'rotation');
   // Its centre, at the corners' mean, turned 45° about y with it.
-  near(rock.centerOfMass[1], 1.5, 1e-12, 'centre y');
+  near(rock.worldCenterOfMass[1], 1.5, 1e-12, 'centre y');
   rock.setPosition(0, 0, 0);
   assert.deepEqual([...rock.position].map((x) => Math.abs(x) < 1e-15 ? 0 : x), [0, 0, 0]);
   rock.setRotation([0, 0, 0, 1]);
-  for (let k = 0; k < 3; k++) near(rock.centerOfMass[k], 0.5, 1e-12, `centre after turning back ${k}`);
+  for (let k = 0; k < 3; k++) near(rock.worldCenterOfMass[k], 0.5, 1e-12, `centre after turning back ${k}`);
   // Reshaped: a new centre, the same origin.
   world.setBody(rock, { vertices: corners(1, 1, 1) });
-  for (let k = 0; k < 3; k++) near(rock.centerOfMass[k], 0, 1e-12, `centre of a cube ${k}`);
+  for (let k = 0; k < 3; k++) near(rock.worldCenterOfMass[k], 0, 1e-12, `centre of a cube ${k}`);
   for (let k = 0; k < 3; k++) near(rock.position[k], 0, 1e-12, `origin ${k}`);
   // A box given a centre of mass: still drawn where it is, turning about the new point.
   const crate = world.addBody({ position: [0, 5, 0], centerOfMass: [0.5, 0, 0], angularVelocity: [0, 0, 1] });
-  near(crate.centerOfMass[0], 0.5, 1e-15, 'given centre');
+  near(crate.worldCenterOfMass[0], 0.5, 1e-15, 'given centre');
   assert.deepEqual([...crate.position], [0, 5, 0]);
   for (let n = 0; n < 60; n++) world.step(DT);
-  near(crate.centerOfMass[0], 0.5, 1e-12, 'the centre stays put');
+  near(crate.worldCenterOfMass[0], 0.5, 1e-12, 'the centre stays put');
   near(Math.hypot(crate.position[0] - 0.5, crate.position[1] - 5), 0.5, 1e-12, 'the origin swings round it');
 });
 
@@ -472,7 +472,7 @@ test("bodyOf gives a hull\'s corners and a compound\'s parts back, and addBody m
     assert.deepEqual(world.bodyOf(b), world.bodyOf(a));
     assert.equal(b.mass, a.mass);
     assert.deepEqual([...b.inertia], [...a.inertia]);
-    assert.deepEqual([...b.centerOfMass], [...a.centerOfMass]);
+    assert.deepEqual([...b.worldCenterOfMass], [...a.worldCenterOfMass]);
   }
   assert.equal(world.bodyOf(world.addBody({ shape: 'hull', vertices: [...corners(1, 1, 1), 0, 0, 0] })).vertices.length, 24);
 });
@@ -514,7 +514,7 @@ test('a 10 cm hull rod at 200 m/s stops on a 2 cm wall, wherever in a step it re
     world.addBody({ type: 'static', size: [0.02, 4, 4], position: [0, 0, 0] });
     const rod = world.addBody({ shape: 'hull', vertices: corners(0.1, 0.02, 0.02), position: [-3 - k * 0.0731, 0, 0], velocity: [200, 0, 0] });
     for (let n = 0; n < 30; n++) world.step(DT);
-    assert.ok(rod.centerOfMass[0] < 0, `start ${k}: through`);
+    assert.ok(rod.worldCenterOfMass[0] < 0, `start ${k}: through`);
   }
 });
 

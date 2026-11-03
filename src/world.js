@@ -22,7 +22,7 @@
 // use fall to a quarter of it. Nothing is sized in advance.
 
 import {
-  fail, show, finite, positive, positive3, vec3, xyz, quat, direction, oneOf, options, known, readOnly,
+  fail, show, finite, positive, positive3, vec3, xyz, quat, direction, oneOf, options, known, readOnly, handle,
 } from './core/check.js';
 import { rotate } from './core/math.js';
 import { Slots, resized, MAX_ID, MAX_SLOTS } from './core/slots.js';
@@ -452,23 +452,23 @@ export class World {
    * stiffer, at a cost; the default is measured, not a guess (see SUBSTEPS).
    */
   get substeps() {
-    this._live('substeps');
+    this._live('world.substeps');
     return this._substeps;
   }
 
   set substeps(value) {
-    this._live('substeps');
+    this._live('world.substeps');
     this._substeps = wholeFromOne(null, 'world.substeps', value);
   }
 
   /** m/s². A copy; assign a new value to change it. */
   get gravity() {
-    this._live('gravity');
+    this._live('world.gravity');
     return Object.freeze([...this._gravity]);
   }
 
   set gravity(value) {
-    this._live('gravity');
+    this._live('world.gravity');
     this._gravity = vec3(null, 'world.gravity', value);
     // What held a body at rest may not now: every sleeping body wakes (rule 36).
     this._wakeAll();
@@ -479,12 +479,12 @@ export class World {
    * disturbs them. Switching it off wakes every sleeping body.
    */
   get sleeping() {
-    this._live('sleeping');
+    this._live('world.sleeping');
     return this._sleeping;
   }
 
   set sleeping(value) {
-    this._live('sleeping');
+    this._live('world.sleeping');
     this._sleeping = flag(null, 'world.sleeping', value);
     if (!value) {
       this._wakeAll();
@@ -499,12 +499,12 @@ export class World {
    * at most this many. Changing it ends the workers it had.
    */
   get workers() {
-    this._live('workers');
+    this._live('world.workers');
     return this._workers;
   }
 
   set workers(value) {
-    this._live('workers');
+    this._live('world.workers');
     this._setWorkers(null, 'world.workers', value);
   }
 
@@ -524,35 +524,35 @@ export class World {
   }
 
   get stepCount() {
-    this._live('stepCount');
+    this._live('world.stepCount');
     return this._stepCount;
   }
 
   set stepCount(_) { readOnly('world.stepCount'); }
 
   get bodyCount() {
-    this._live('bodyCount');
+    this._live('world.bodyCount');
     return this._slots.count;
   }
 
   set bodyCount(_) { readOnly('world.bodyCount'); }
 
   get jointCount() {
-    this._live('jointCount');
+    this._live('world.jointCount');
     return this._joints.count;
   }
 
   set jointCount(_) { readOnly('world.jointCount'); }
 
   get transforms() {
-    this._live('transforms');
+    this._live('world.transforms');
     return this._transforms;
   }
 
   set transforms(_) { readOnly('world.transforms'); }
 
   get previous() {
-    this._live('previous');
+    this._live('world.previous');
     return this._previous;
   }
 
@@ -624,14 +624,16 @@ export class World {
       // Whichever the body was given, so addBody(world.bodyOf(b)) makes a copy.
       if (spec.massGiven) out.mass = spec.mass;
       else out.density = spec.density;
-      if (spec.inertiaGiven) out.inertia = [...spec.inertia];
-      if (spec.centerOfMass !== null) out.centerOfMass = [...spec.centerOfMass];
+      // Not given reads back as null, which setBody and addBody take as
+      // "work it out", so a copy follows its shape as the original does.
+      out.inertia = spec.inertiaGiven ? [...spec.inertia] : null;
+      if (spec.type !== 'character') out.centerOfMass = spec.centerOfMass === null ? null : [...spec.centerOfMass];
     }
     for (const k of MATERIAL) out[k] = spec[k];
     out.lockRotation = [...spec.lockRotation];
     if (spec.type === 'character') {
       out.maxSlope = spec.maxSlope;
-      if (spec.stepGiven) out.stepHeight = spec.stepHeight;
+      out.stepHeight = spec.stepGiven ? spec.stepHeight : null;
     }
     out.position = [...spec.position];
     out.rotation = [...spec.rotation];
@@ -696,8 +698,7 @@ export class World {
     this._live('contacts');
     let id = -1;
     if (body !== undefined) {
-      if (!(body instanceof Body)) fail('contacts', `body must be a Body, got ${show(body)}`);
-      if (body.world !== this) fail('contacts', 'that body belongs to another world');
+      handle('contacts', 'body', body, this, Body, this._slots, true);
       id = body.id;
     }
     const e = this._events, out = [];
@@ -853,11 +854,21 @@ export class World {
   }
 
   body(id) {
-    this._live('body');
+    return new Body(this, this._id('body', id));
+  }
+
+  /** A handle for a joint's id, as body(id) is for a body's. Doesn't check the joint is alive. */
+  joint(id) {
+    return new Joint(this, this._id('joint', id));
+  }
+
+  /** An id given to body() or joint(): any whole number an id can be. */
+  _id(caller, id) {
+    this._live(caller);
     if (!Number.isInteger(id) || id < 0 || id > MAX_ID) {
-      fail('body', `id must be a whole number from 0 to ${MAX_ID}, got ${show(id)}`);
+      fail(caller, `id must be a whole number from 0 to ${MAX_ID}, got ${show(id)}`);
     }
-    return new Body(this, id);
+    return id;
   }
 
   // ---- stepping ----
@@ -1408,12 +1419,8 @@ export class World {
       maxDistance = m;
     }
     const mask = o.mask === undefined ? 0xffffffff : bits(caller, 'mask', o.mask);
-    // A removed body leaves nothing to leave out; one from another world is a mistake.
-    let ignore = -1;
-    if (o.ignore !== undefined && o.ignore !== null) {
-      if (!(o.ignore instanceof Body) || o.ignore.world !== this) fail(caller, `ignore must be a Body of this world, got ${show(o.ignore)}`);
-      ignore = this._slots.slotOf(o.ignore.id);
-    }
+    // Checked as every handle is: one removed, or from another world, is a mistake.
+    const ignore = o.ignore === undefined || o.ignore === null ? -1 : handle(caller, 'ignore', o.ignore, this, Body, this._slots);
     const rotation = o.rotation === undefined ? [0, 0, 0, 1] : quat(caller, 'rotation', o.rotation);
     return { maxDistance, mask, ignore, rotation };
   }
@@ -1424,28 +1431,30 @@ export class World {
    */
   _queryShape(caller, given) {
     this._live(caller);
+    // Its fields are named as part of `shape`, as a compound's are as part of
+    // `parts[0]`, so they can't be mistaken for the options object's.
     const o = options(caller, given, 'shape');
-    known(caller, o, SHAPE_OPTIONS);
+    known(`${caller}: shape`, o, SHAPE_OPTIONS);
     const has = (k) => o[k] !== undefined;
-    const shape = has('shape') ? oneOf(caller, 'shape', o.shape, QUERY_SHAPES) : DEFAULTS.shape;
+    const shape = has('shape') ? oneOf(caller, 'shape.shape', o.shape, QUERY_SHAPES) : DEFAULTS.shape;
     for (const k of ['size', 'radius', 'height']) {
-      if (has(k) && !SHAPE_SIZES[shape].includes(k)) fail(caller, `a ${shape} has no ${k}`);
+      if (has(k) && !SHAPE_SIZES[shape].includes(k)) fail(caller, `shape: a ${shape} has no ${k}`);
     }
     const s = QUERY;
     if (shape === 'box') {
-      const size = has('size') ? positive3(caller, 'size', o.size) : DEFAULTS.size;
+      const size = has('size') ? positive3(caller, 'shape.size', o.size) : DEFAULTS.size;
       s.kind = BOX_KIND;
       s.half[0] = size[0] * 0.5; s.half[1] = size[1] * 0.5; s.half[2] = size[2] * 0.5;
       return s;
     }
-    const radius = has('radius') ? positive(caller, 'radius', o.radius) : DEFAULTS.radius;
+    const radius = has('radius') ? positive(caller, 'shape.radius', o.radius) : DEFAULTS.radius;
     if (shape === 'sphere') {
       s.kind = SPHERE_KIND;
       s.half[0] = radius;
       return s;
     }
-    const height = has('height') ? positive(caller, 'height', o.height) : DEFAULTS.height;
-    if (height < 2 * radius) fail(caller, `height must be at least twice radius (${2 * radius}), got ${height}`);
+    const height = has('height') ? positive(caller, 'shape.height', o.height) : DEFAULTS.height;
+    if (height < 2 * radius) fail(caller, `shape.height must be at least twice radius (${2 * radius}), got ${height}`);
     s.kind = CAPSULE_KIND;
     s.half[0] = radius;
     s.half[1] = (height - 2 * radius) * 0.5;
@@ -1954,7 +1963,7 @@ export class World {
     p[s3] = P[0] + v3[0]; p[s3 + 1] = P[1] + v3[1]; p[s3 + 2] = P[2] + v3[2];
   }
 
-  /** body.centerOfMass: where the step works from, in the world, a frozen copy. */
+  /** body.worldCenterOfMass: where the step works from, in the world, a frozen copy. */
   _centerOf(caller, id) {
     return this._vector(caller, id, this._position, 3);
   }
@@ -2043,14 +2052,12 @@ export class World {
   _remove(caller, body) {
     this._live(caller);
     if (body instanceof Joint) {
-      if (body.world !== this) fail(caller, 'that joint belongs to another world');
-      const j = this._joints.slots.slotOf(body.id);
+      const j = handle(caller, 'handle', body, this, Joint, this._joints.slots, true);
       if (j >= 0) dropJoint(this, j);
       return;
     }
     if (!(body instanceof Body)) fail(caller, `handle must be a Body or a Joint, got ${show(body)}`);
-    if (body.world !== this) fail(caller, 'that body belongs to another world');
-    const s = this._slots.slotOf(body.id);
+    const s = handle(caller, 'handle', body, this, Body, this._slots, true);
     if (s < 0) return;   // already gone: removing twice is harmless, as in Winding
     // Its joints go with it: a joint to nothing has no meaning.
     if (this._jointHead[s] !== 0) dropJointsOf(this, s);
@@ -2096,9 +2103,7 @@ export class World {
 
   _slotOfBody(caller, body) {
     this._live(caller);
-    if (!(body instanceof Body)) fail(caller, `body must be a Body, got ${show(body)}`);
-    if (body.world !== this) fail(caller, 'that body belongs to another world');
-    return this._slotOf(caller, body.id);
+    return handle(caller, 'body', body, this, Body, this._slots);
   }
 
   _grow(caller) {

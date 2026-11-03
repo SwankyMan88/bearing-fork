@@ -57,7 +57,7 @@
 // joints, through two of these columns, so removing a body can remove its
 // joints, and the pair filter can see that two bodies are joined.
 
-import { fail, show, finite, vec3, direction, quat, oneOf, options, known, readOnly } from './core/check.js';
+import { fail, show, finite, vec3, direction, quat, oneOf, options, known, readOnly, handle } from './core/check.js';
 import { atan2, rotate } from './core/math.js';
 import { Slots, resized, MAX_SLOTS } from './core/slots.js';
 import { Body } from './body.js';
@@ -72,11 +72,11 @@ const DYNAMIC = 0;   // World's type code
 const USED = 1;      // Slots' state for a slot in use
 
 const OPTIONS = ['type', 'a', 'b', 'anchor', 'anchorB', 'axis', 'min', 'max', 'length', 'cone', 'target',
-  'motorSpeed', 'motorForce', 'friction', 'frequency', 'dampingRatio', 'collide'];
+  'motorSpeed', 'motorForce', 'frictionForce', 'frequency', 'dampingRatio', 'collide'];
 /** Options every joint has. */
 const SHARED = ['type', 'a', 'b', 'collide'];
 /** And each type's own; giving one another type has throws. A rotation joint holds no point, so has no anchors. */
-const DRIVE = ['target', 'motorForce', 'friction', 'frequency', 'dampingRatio'];
+const DRIVE = ['target', 'motorForce', 'frictionForce', 'frequency', 'dampingRatio'];
 const OWN = [
   ['anchor', 'anchorB'],
   ['anchor', 'anchorB', 'axis', 'min', 'max', 'cone', ...DRIVE],
@@ -106,6 +106,7 @@ const COLUMNS = [
   ['localB', Float64Array, 3],    // in b's own frame, or the world point with no b
   ['frameA', Float64Array, 4],    // the joint's axes in a's own frame, as a rotation of x to its axis
   ['frameB', Float64Array, 4],
+  ['axis', Float64Array, 3],      // the axis as it was last given, world space, unit length: what jointOf reads back
   ['min', Float64Array, 1],
   ['max', Float64Array, 1],
   ['given', Uint8Array, 1],
@@ -113,7 +114,7 @@ const COLUMNS = [
   ['cone', Float64Array, 1],
   ['motorSpeed', Float64Array, 1],
   ['motorForce', Float64Array, 1],
-  ['friction', Float64Array, 1],
+  ['friction', Float64Array, 1],  // the frictionForce option
   ['frequency', Float64Array, 1],
   ['dampingRatio', Float64Array, 1],
   // The target, if `given` has TARGET: a hinge's angle or a slider's position
@@ -177,7 +178,7 @@ export class Joints {
     // Every column named first, then made: an object given more than a dozen
     // fields by computed name becomes a dictionary (World's FAST PROPERTIES).
     this.type = null; this.a = null; this.b = null; this.localA = null; this.localB = null;
-    this.frameA = null; this.frameB = null; this.min = null; this.max = null; this.given = null;
+    this.frameA = null; this.frameB = null; this.axis = null; this.min = null; this.max = null; this.given = null;
     this.length = null; this.cone = null; this.motorSpeed = null; this.motorForce = null;
     this.friction = null; this.frequency = null; this.dampingRatio = null; this.target = null;
     this.collide = null; this.next = null; this.impulse = null; this.force = null; this.torque = null; this.list = null;
@@ -257,11 +258,11 @@ export class Joint {
   set alive(_) { readOnly('joint.alive'); }
 
   /** The mean force it pushed a with over the last step it was solved in, N, world space: a frozen copy. b took the opposite. */
-  get force() { return pushed(this.#world, 'force', this); }
+  get force() { return pushed(this.#world, 'force', this.#id); }
   set force(_) { readOnly('joint.force'); }
 
   /** The mean torque it turned a with over that step, N·m, world space, about its anchor on a: a frozen copy. */
-  get torque() { return pushed(this.#world, 'torque', this); }
+  get torque() { return pushed(this.#world, 'torque', this.#id); }
   set torque(_) { readOnly('joint.torque'); }
 
   /** Same as world.remove(joint). Does nothing if the joint is already gone. */
@@ -275,27 +276,31 @@ export class Joint {
 /** The joint's slot, from a handle given to `caller`. */
 export function jointSlot(world, caller, joint) {
   world._live(caller);
-  if (!(joint instanceof Joint)) fail(caller, `joint must be a Joint, got ${show(joint)}`);
-  if (joint.world !== world) fail(caller, 'that joint belongs to another world');
-  const j = world._joints.slots.slotOf(joint.id);
-  if (j < 0) fail(caller, 'this joint was removed');
-  return j;
+  return handle(caller, 'joint', joint, world, Joint, world._joints.slots);
 }
 
 /** joint.force or joint.torque: its column `name`, copied. */
-function pushed(world, name, joint) {
-  const j = jointSlot(world, name, joint), c = world._joints[name];
+function pushed(world, name, id) {
+  const caller = `joint.${name}`;
+  world._live(caller);
+  const j = world._joints.slots.slotOf(id);
+  if (j < 0) fail(caller, 'this joint was removed');
+  const c = world._joints[name];
   return Object.freeze([c[3 * j], c[3 * j + 1], c[3 * j + 2]]);
 }
 
 /** A joined body's slot: `name` is 'a' or 'b'. */
 function bodySlot(world, caller, name, body) {
-  if (!(body instanceof Body) || body.world !== world) {
-    fail(caller, `${name} must be a Body of this world${name === 'b' ? ', or null' : ''}, got ${show(body)}`);
-  }
-  const s = world._slots.slotOf(body.id);
-  if (s < 0) fail(caller, `${name} was removed`);
-  return s;
+  return handle(caller, name, body, world, Body, world._slots);
+}
+
+/**
+ * Renamed before 1.0 (rule 47): a joint's friction is a force, the most it
+ * resists with, as motorForce is the most its motor pushes with, so it is
+ * named the same way; a body's friction is a coefficient, and keeps the name.
+ */
+function renamed(caller, o) {
+  if ('friction' in o) fail(caller, 'friction is now frictionForce, the same N·m or N');
 }
 
 export function addJoint(world, given) {
@@ -303,6 +308,7 @@ export function addJoint(world, given) {
   world._live(caller);
   world._pairEpoch++;   // its bodies may stop colliding (pairs.js holds)
   const o = options(caller, given);
+  renamed(caller, o);
   known(caller, o, OPTIONS);
   const has = (k) => o[k] !== undefined;
   const type = has('type') ? TYPES.indexOf(oneOf(caller, 'type', o.type, TYPES)) : BALL;
@@ -332,6 +338,7 @@ export function addJoint(world, given) {
   J.collide[j] = collide ? 1 : 0;
   place(world, j, anchor, anchorB, true, true);
   orient(world, j, axis);
+  J.axis.set(axis, 3 * j);
   link(world, j, a, 0);
   if (b >= 0) link(world, j, b, 1);
   // Joined, they may no longer rest as they were (rule 36).
@@ -345,16 +352,26 @@ export function setJoint(world, joint, changes) {
   const j = jointSlot(world, caller, joint);
   world._pairEpoch++;   // collide may change (pairs.js holds)
   const o = options(caller, changes, 'changes');
+  renamed(caller, o);
   known(caller, o, OPTIONS);
   const has = (k) => o[k] !== undefined;
-  if (has('a') || has('b')) fail(caller, "a and b can't change; remove the joint and add another");
   const J = world._joints;
+  // a and b may be given as they are, so setJoint(joint, jointOf(joint)) works;
+  // naming any other body is a change, which a joint can't take.
+  const same = (k, s) => (s < 0 ? o[k] === null : o[k] instanceof Body && o[k].world === world && o[k].id === world._slots.id(s));
+  if ((has('a') && !same('a', J.a[j])) || (has('b') && !same('b', J.b[j]))) fail(caller, "a and b can't change; remove the joint and add another");
   const was = J.type[j];
   const type = has('type') ? TYPES.indexOf(oneOf(caller, 'type', o.type, TYPES)) : was;
   own(caller, type, o);
-  const anchor = has('anchor') ? vec3(caller, 'anchor', o.anchor) : null;
-  const anchorB = has('anchorB') ? vec3(caller, 'anchorB', o.anchorB) : null;
-  const axis = has('axis') ? direction(caller, 'axis', o.axis) : null;
+  // An anchor or axis given as it already is changes nothing, so a joint
+  // given back what jointOf read keeps its angle, its zero and its impulses.
+  let anchor = has('anchor') ? vec3(caller, 'anchor', o.anchor) : null;
+  let anchorB = has('anchorB') ? vec3(caller, 'anchorB', o.anchorB) : null;
+  let axis = has('axis') ? direction(caller, 'axis', o.axis) : null;
+  const named = anchorB !== null;
+  if (anchor !== null && equal(anchor, worldAnchor(world, j, 0), 0)) anchor = null;
+  if (anchorB !== null && equal(anchorB, worldAnchor(world, j, 1), 0)) anchorB = null;
+  if (axis !== null && equal(axis, J.axis, 3 * j)) axis = null;
   // A new type starts from its own defaults, as a new shape does; the anchors,
   // axis and collide carry over. A new distance joint is as long as its two
   // ends are apart now.
@@ -378,14 +395,17 @@ export function setJoint(world, joint, changes) {
   // speeding up. A fixed joint's ANG holds it together, so only a ball's goes;
   // a rotation joint's holds it again, with no cone row left to solve.
   const i = j * IMPULSES;
-  if (spec.motorForce === 0 && spec.friction === 0) {
+  if (spec.motorForce === 0 && spec.frictionForce === 0) {
     J.impulse[i + MOTOR] = 0;
     if (type === BALL) { J.impulse[i + ANG] = 0; J.impulse[i + ANG + 1] = 0; J.impulse[i + ANG + 2] = 0; }
     if (type === ROTATION) J.impulse[i + CONE] = 0;
   }
-  J.given[j] = spec.given | (J.given[j] & ANCHOR_B) | (anchorB ? ANCHOR_B : 0);
+  J.given[j] = spec.given | (J.given[j] & ANCHOR_B) | (named ? ANCHOR_B : 0);
   if (anchor || anchorB) place(world, j, ends[0], ends[1], anchor !== null || anchorB === null, true);
-  if (axis) orient(world, j, axis);
+  if (axis) {
+    orient(world, j, axis);
+    J.axis.set(axis, 3 * j);
+  }
   const apart = J.collide[j] === 0 && collide;
   J.collide[j] = collide ? 1 : 0;
   // Let go of each other, the two may now collide: the broadphase is asked
@@ -402,20 +422,19 @@ export function jointOf(world, j) {
   const out = { type: TYPES[type], a: new Body(world, world._slots.id(a)), b: b >= 0 ? new Body(world, world._slots.id(b)) : null };
   if (type !== ROTATION) out.anchor = worldAnchor(world, j, 0);
   if (type === DISTANCE || (type !== ROTATION && (J.given[j] & ANCHOR_B) !== 0)) out.anchorB = worldAnchor(world, j, 1);
-  if (type !== FIXED && type !== DISTANCE) {
-    QA.set(world._rotation.subarray(4 * a, 4 * a + 4));
-    multiply(QA, 0, J.frameA, 4 * j, QA, 0);
-    out.axis = column(QA, 0);
-  }
+  // The axis as given, not worked out again from how the bodies are turned,
+  // which would read it back a rounding off and make it look changed.
+  if (type !== FIXED && type !== DISTANCE) out.axis = [J.axis[3 * j], J.axis[3 * j + 1], J.axis[3 * j + 2]];
   if (type === DISTANCE) out.length = s.length;
+  // Not given reads back as null, which addJoint and setJoint take as the default.
   if (type !== FIXED && type !== ROTATION) {
-    if (s.given & MIN) out.min = s.min;
-    if (s.given & MAX) out.max = s.max;
+    out.min = s.given & MIN ? s.min : null;
+    out.max = s.given & MAX ? s.max : null;
   }
   if (type === BALL || type === ROTATION) out.cone = s.cone;
   if (type !== FIXED && type !== DISTANCE) out.target = s.target;
   if (type === HINGE || type === SLIDER) out.motorSpeed = s.motorSpeed;
-  if (type !== FIXED && type !== DISTANCE) { out.motorForce = s.motorForce; out.friction = s.friction; }
+  if (type !== FIXED && type !== DISTANCE) { out.motorForce = s.motorForce; out.frictionForce = s.frictionForce; }
   if (type !== FIXED) { out.frequency = s.frequency; out.dampingRatio = s.dampingRatio; }
   out.collide = J.collide[j] === 1;
   return out;
@@ -460,7 +479,7 @@ const DEFAULTS = Object.freeze({
   // No target: a motor drives a speed.
   target: null,
   // Turning freely, as Jolt's, Rapier's and Box2D's joints do unless given it.
-  friction: 0,
+  frictionForce: 0,
   // No spring: a distance joint a rod, a drive as stiff as it can be. Given
   // one, it settles without overshooting, as Bearing's contacts do, unless
   // told to bounce.
@@ -474,13 +493,13 @@ function read(J, j) {
     : turned ? [J.target[t], J.target[t + 1], J.target[t + 2], J.target[t + 3]] : J.target[t];
   return {
     min: J.min[j], max: J.max[j], given: J.given[j] & (MIN | MAX | TARGET), length: J.length[j], cone: J.cone[j], target,
-    motorSpeed: J.motorSpeed[j], motorForce: J.motorForce[j], friction: J.friction[j], frequency: J.frequency[j], dampingRatio: J.dampingRatio[j],
+    motorSpeed: J.motorSpeed[j], motorForce: J.motorForce[j], frictionForce: J.friction[j], frequency: J.frequency[j], dampingRatio: J.dampingRatio[j],
   };
 }
 
 function write(J, j, s) {
   J.min[j] = s.min; J.max[j] = s.max; J.length[j] = s.length; J.cone[j] = s.cone;
-  J.motorSpeed[j] = s.motorSpeed; J.motorForce[j] = s.motorForce; J.friction[j] = s.friction;
+  J.motorSpeed[j] = s.motorSpeed; J.motorForce[j] = s.motorForce; J.friction[j] = s.frictionForce;
   J.frequency[j] = s.frequency; J.dampingRatio[j] = s.dampingRatio;
   const t = s.target, o = 4 * j;
   if (t === null) J.target.fill(0, o, o + 4);
@@ -502,8 +521,10 @@ function own(caller, type, o) {
 function settings(caller, type, o, base, gap) {
   const has = (k) => o[k] !== undefined;
   const s = { ...base };
-  if (type === DISTANCE && base === DEFAULTS) s.length = gap;
-  if (has('length')) s.length = atLeastZero(caller, 'length', o.length);
+  // null is a value, as for min and max: back to the default, how far apart
+  // the anchors are now, as a new distance joint's.
+  if (type === DISTANCE && (base === DEFAULTS || o.length === null)) s.length = gap;
+  if (has('length') && o.length !== null) s.length = atLeastZero(caller, 'length', o.length);
   if (has('cone')) {
     const c = o.cone;
     if (typeof c !== 'number' || !(c >= 0 && c <= Math.PI)) fail(caller, `cone must be an angle from 0 to π, in radians, got ${show(c)}`);
@@ -515,7 +536,7 @@ function settings(caller, type, o, base, gap) {
   s.given = (s.given & ~TARGET) | (s.target !== null ? TARGET : 0);
   if (has('motorSpeed')) s.motorSpeed = finite(caller, 'motorSpeed', o.motorSpeed);
   if (has('motorForce')) s.motorForce = atLeastZero(caller, 'motorForce', o.motorForce);
-  if (has('friction')) s.friction = atLeastZero(caller, 'friction', o.friction);
+  if (has('frictionForce')) s.frictionForce = atLeastZero(caller, 'frictionForce', o.frictionForce);
   if (has('frequency')) s.frequency = atLeastZero(caller, 'frequency', o.frequency);
   if (has('dampingRatio')) s.dampingRatio = atLeastZero(caller, 'dampingRatio', o.dampingRatio);
   // null is a value here, as for a body's inertia: back to the default.
@@ -533,7 +554,9 @@ function settings(caller, type, o, base, gap) {
 /** A target, checked for its type: an angle for a hinge, metres for a slider, a rotation for a ball or rotation joint, normalized. */
 function aim(caller, type, v) {
   if (type === HINGE) {
-    if (typeof v !== 'number' || !(v >= -Math.PI && v <= Math.PI)) fail(caller, `target must be from -π to π, in radians, got ${show(v)}`);
+    // A rotation given to a hinge is told it needs a number, not a range.
+    if (typeof v !== 'number') finite(caller, 'target', v);
+    if (!(v >= -Math.PI && v <= Math.PI)) fail(caller, `target must be from -π to π, in radians, got ${show(v)}`);
     return v;
   }
   if (type === SLIDER) return finite(caller, 'target', v);
@@ -568,6 +591,11 @@ function low(type, given, min, length, frequency) {
 function high(type, given, max, length, frequency) {
   if (given & MAX) return max;
   return type === DISTANCE && frequency === 0 ? length : Infinity;
+}
+
+/** Whether vector v is the 3 numbers of `list` from `at`, exactly. */
+function equal(v, list, at) {
+  return v[0] === list[at] && v[1] === list[at + 1] && v[2] === list[at + 2];
 }
 
 /** How far apart two points are. */
@@ -2371,9 +2399,3 @@ function axes(q, x, y, z) {
   z[0] = 2 * (qx * qz + qy * qw); z[1] = 2 * (qy * qz - qx * qw); z[2] = 1 - 2 * (qx * qx + qy * qy);
 }
 
-/** Column k of the rotation q, as a fresh array. */
-function column(q, k) {
-  axes(q, A1, P1, P2);
-  const c = k === 0 ? A1 : k === 1 ? P1 : P2;
-  return [c[0], c[1], c[2]];
-}

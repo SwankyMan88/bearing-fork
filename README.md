@@ -18,7 +18,7 @@ files you import are the files in this repository, readable and steppable in a d
 runs wherever JavaScript does: browsers, Node, Deno, Bun and workers. The same inputs give the same
 results to the bit on every machine, which replays, tests and lockstep multiplayer need. It draws
 nothing and imports nothing from any engine: Three.js, Babylon.js, PlayCanvas, Pixi and Winding
-read its results the same way. It is at 0.14, before 1.0, so its API can still change, and it is slower than
+read its results the same way. Its API is stable through 1.x (see [What 1.x promises](docs/API.md#promises)), and it is slower than
 the WebAssembly engines; see [How it compares](#how-it-compares) and
 [Limitations](#limitations).
 
@@ -170,7 +170,7 @@ import are the files in this repository.
 
 ```html
 <script type="module">
-  import { World } from 'https://cdn.jsdelivr.net/npm/bearing-physics@0.14.0/src/bearing.js';
+  import { World } from 'https://cdn.jsdelivr.net/npm/bearing-physics@1.0.0/src/bearing.js';
 </script>
 ```
 
@@ -190,8 +190,8 @@ import { World } from 'bearing-physics';
 <script type="importmap">
 {
   "imports": {
-    "bearing-physics": "https://cdn.jsdelivr.net/npm/bearing-physics@0.14.0/src/bearing.js",
-    "bearing-physics/": "https://cdn.jsdelivr.net/npm/bearing-physics@0.14.0/src/"
+    "bearing-physics": "https://cdn.jsdelivr.net/npm/bearing-physics@1.0.0/src/bearing.js",
+    "bearing-physics/": "https://cdn.jsdelivr.net/npm/bearing-physics@1.0.0/src/"
   }
 }
 </script>
@@ -247,8 +247,9 @@ PlayCanvas, Pixi and Winding.
 
 ## Limitations
 
-- **Before 1.0.** The API can still change in a minor version (0.x.0); each change is in the
-  [CHANGELOG](CHANGELOG.md).
+- **Stable, not frozen.** Through 1.x, code written against the [API reference](docs/API.md) keeps
+  working; results, measured figures and error wording may still change between versions (see
+  [What 1.x promises](docs/API.md#promises)).
 - **3D only.** There is no 2D module yet. Bodies locked to turn only in one plane, with
   [`lockRotation`](docs/API.md#world-addbody), stay in it to the bit, but they still cost what 3D
   bodies cost.
@@ -268,8 +269,8 @@ PlayCanvas, Pixi and Winding.
 - **A sensor doesn't see a body that passes all the way through it within one step**: sensors are
   checked where a step leaves bodies.
 - **Saved data belongs to its version.** [`world.save()`](docs/API.md#world-save) follows Bearing's
-  own layout, so data from another version may not load, and it is large: a settled heap of 1,000
-  boxes is about 7 MB of JSON.
+  own layout, so it is stamped with the version that saved it and loads only into that version,
+  and it is large: a settled heap of 1,000 boxes is about 7 MB of JSON.
 
 ## Demo
 
