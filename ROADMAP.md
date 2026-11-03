@@ -830,6 +830,7 @@ Each milestone that adds API is a minor version. Fixes between them are patches.
 | 0.13.0 | 17 | Pose motors. |
 | 0.14.0 | 18, 19, 20 | The first release, 2026-11-02 (Nolan chose to start at the planned number): everything through joint forces, with 19 and 20 in it. |
 | 1.0.0 | 21 | Released 2026-11-03: the API gone through and made to last, the determinism hash on Bun. |
+| 1.1.0 | — | Released 2026-11-03: impact events, groups, `ignore` lists, `body.moveTo`. |
 
 ### How a release is made
 
@@ -1054,3 +1055,7 @@ Winding's way, copied before the first one:
   angles, so positions and angles copy into Winding unchanged and the 2D camera's zoom is the
   pixels per metre. Density 1000 kg/m², a slab 1 m deep. Not started: every game in the series is
   3D.
+- **2026-11-03.** 1.1.0 released, at Nolan's word ("Push it and release 1.1.0"): impact events for
+  bodies already touching (the battle sim's damage), groups, `ignore` lists and `body.moveTo`.
+  Left until a game asks: per-body sleep, listing bodies and joints, more contact detail and
+  friction per compound part; elliptical joint cones until a ragdoll's limits look wrong.

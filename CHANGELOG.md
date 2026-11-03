@@ -7,6 +7,15 @@ All notable changes to Bearing are recorded here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-03
+
+What the games need first from 1.x, added without changing anything 1.0 code relies on. A hit
+between bodies already touching is now an event, so damage can be read from every blow; a group
+keeps each ragdoll's parts off one another, a hundred ragdolls at once; queries leave out a list
+of bodies; and `body.moveTo` drives an animated kinematic body to a pose, exactly. No simulation
+results changed from 1.0.0. Saves move to format 12, and as before load only into the version
+that made them.
+
 ### Added
 
 - **Impact events.** `world.contacts()` gives `{ type: 'impact', a, b, point, normal, speed }`, a
@@ -454,6 +463,7 @@ version may still change it.
   continuous collision doesn't make a sensor see a body that passes through it within a step (it
   said a later version would).
 
-[Unreleased]: https://github.com/getlowarc/bearing/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/getlowarc/bearing/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/getlowarc/bearing/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/getlowarc/bearing/compare/v0.14.0...v1.0.0
 [0.14.0]: https://github.com/getlowarc/bearing/releases/tag/v0.14.0
