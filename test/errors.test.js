@@ -51,8 +51,8 @@ const joined = () => {
   return { world, body, joint: world.addJoint({ a: body }) };
 };
 
-const JOINT_OPTIONS = 'type, a, b, anchor, anchorB, axis, min, max, length, cone, target, motorSpeed, motorForce, frictionForce, frequency, dampingRatio, collide';
-const OPTIONS = 'type, shape, size, radius, height, vertices, indices, heights, columns, spacing, parts, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, sensor, lockRotation, maxSlope, stepHeight, position, rotation, velocity, angularVelocity';
+const JOINT_OPTIONS = 'type, a, b, anchor, anchorB, axis, min, max, length, cone, swing, target, motorSpeed, motorForce, frictionForce, frequency, dampingRatio, collide';
+const OPTIONS = 'type, shape, size, radius, height, vertices, indices, heights, columns, spacing, parts, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, sensor, lockRotation, lockPosition, maxSlope, stepHeight, pushForce, position, rotation, velocity, angularVelocity';
 
 /** The smallest .glb: one node, 'floor', showing one triangle; `json` adds to its JSON. */
 function glb(json = {}) {
@@ -119,7 +119,9 @@ const cases = [
       [e, run({ maxSlope: 0.5 }), `${call}: a dynamic body has no maxSlope`],
       [e, run({ type: 'character', maxSlope: 2 }), `${call}: maxSlope must be an angle from 0 to π/2, in radians, got 2`],
       [e, run({ type: 'character', stepHeight: -0.1 }), `${call}: stepHeight must be 0 or more, or null to follow the size, got -0.1`],
+      [e, run({ type: 'character', pushForce: -1 }), `${call}: pushForce must be 0 or more, got -1`],
       [e, run({ lockRotation: true }), `${call}: lockRotation must be 3 true or false values, got true`],
+      [e, run({ lockPosition: [true] }), `${call}: lockPosition must be 3 true or false values, got true`],
       [e, run({ shape: 'heightfield', type: 'character' }), `${call}: type must be 'static' or 'kinematic' for a heightfield, got 'character'`],
       [e, run({ shape: 'cube' }), `${call}: shape must be 'box', 'sphere', 'capsule', 'hull', 'compound', 'mesh' or 'heightfield', got 'cube'`],
       [e, run({ shape: 'hull', vertices: [0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0] }), `${call}: vertices must span a solid (4 points not in one plane), got 4 points in one plane`],
@@ -191,8 +193,8 @@ const cases = [
     `load: this data was saved by Bearing 0.13.0, and this is ${VERSION}; a save loads only into the version that made it`],
   ['world-load', () => World.load({ format: 9, objects: [] }),
     `load: this data was saved by a Bearing from before saves were stamped, and this is ${VERSION}; a save loads only into the version that made it`],
-  ['world-load', () => World.load({ ...new World().save(), format: 11 }), 'load: data is format 11; this Bearing reads format 12'],
-  ['world-load', () => World.load({ version: VERSION, format: 12, objects: [{ c: 'Box', f: {} }] }), "load: data is damaged: an object of an unknown kind, 'Box'"],
+  ['world-load', () => World.load({ ...new World().save(), format: 14 }), 'load: data is format 14; this Bearing reads format 15'],
+  ['world-load', () => World.load({ version: VERSION, format: 15, objects: [{ c: 'Box', f: {} }] }), "load: data is damaged: an object of an unknown kind, 'Box'"],
   ['world-debuglines', () => gone().world.debugLines(), 'debugLines: this world was destroyed'],
   ['world-debuglines', () => fresh().world.debugLines(true), 'debugLines: options must be an object, got true'],
   ['world-debuglines', () => fresh().world.debugLines({ shape: true }), "debugLines: unknown option 'shape' (did you mean 'shapes'?)"],
@@ -229,7 +231,10 @@ const cases = [
       [e, run({ anchorB: 'x' }), `${call}: anchorB must be 3 finite numbers, got 'x'`],
       [e, run({ type: 'hinge', axis: [0, 0, 0] }), `${call}: axis must be 3 finite numbers, not all zero, got 0,0,0`],
       [e, run({ type: 'distance', length: -1 }), `${call}: length must be 0 or more, got -1`],
-      [e, run({ cone: 4 }), `${call}: cone must be an angle from 0 to π, in radians, got 4`],
+      [e, run({ cone: 4 }), `${call}: cone must be an angle from 0 to π, or two above 0, in radians, got 4`],
+      [e, run({ cone: [0.5, 0] }), `${call}: cone must be an angle from 0 to π, or two above 0, in radians, got 0.5,0`],
+      [e, run({ swing: [0, 0, 0] }), `${call}: swing must be 3 finite numbers, not all zero, got 0,0,0`],
+      [e, run({ axis: [0, 2, 0], swing: [0, -1, 0] }), `${call}: swing must be at an angle to axis, got 0,-1,0`],
       [e, run({ type: 'hinge', motorSpeed: NaN }), `${call}: motorSpeed must be a finite number, got NaN`],
       [e, run({ type: 'slider', motorForce: -1 }), `${call}: motorForce must be 0 or more, got -1`],
       [e, run({ type: 'hinge', frictionForce: -0.5 }), `${call}: frictionForce must be 0 or more, got -0.5`],

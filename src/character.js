@@ -30,13 +30,23 @@
 // drops the part into the wall, landing drops the fall. Gravity acts on it
 // only in the air, and "up" is against gravity.
 //
+// PUSHING. Given a pushForce, a character walking into a dynamic body pushes
+// it: by the impulse that brings that body's speed at the point up to the
+// character's own into it, no more than pushForce for the step (Jolt's
+// CharacterVirtual, its mMaxStrength). The character still stops there this
+// step, as at a wall, and follows on the next as the body gives way: moved
+// into it instead, the solve would shove it as hard as the overlap asks,
+// which is the 600 N·s above.
+//
 // Nothing here reads input, and the game's velocity is all it is told.
 
 import { place, sweep, deepest } from './query.js';
 import { PIXEL } from './contact.js';
 import { Shape, SPHERE, CAPSULE } from './collide.js';
+import { rotate } from './core/math.js';
 
 export const CHARACTER = 3;   // World's type code
+const DYNAMIC = 0;            // and a dynamic body's
 
 /**
  * Casts a move takes before it gives up the rest. Each slide takes one
@@ -108,13 +118,14 @@ function move(world, s, dt) {
   // Walking on the ground follows its slope, at the speed asked for across it.
   if (grounded && !jumping) follow(world._groundAt, 6 * s + 3);
   let onGround = grounded;
-  let count = 0;
+  let count = 0, pushed = -1;
   for (let k = 0; k < SLIDES; k++) {
     const len = Math.sqrt(dot(rest, rest));
     if (!(len > 0)) break;
     const dx = rest[0] / len, dy = rest[1] / len, dz = rest[2] / len;
     at(pos);
-    if (sweep(world, shape, s, -1, dx, dy, dz, len, hit) < 0) {
+    const o = sweep(world, shape, s, -1, dx, dy, dz, len, hit);
+    if (o < 0) {
       pos[0] += rest[0]; pos[1] += rest[1]; pos[2] += rest[2];
       break;
     }
@@ -132,7 +143,12 @@ function move(world, s, dt) {
     } else {
       // A step it can walk up onto, if it is on the ground and walking.
       if (onGround && !jumping && h > 0 && climb(world, s, h)) continue;
-      // A wall, a ceiling, or ground too steep to walk up: none of it is climbed.
+      // A wall, a ceiling, or ground too steep to walk up: none of it is
+      // climbed, but a dynamic one may be pushed, once a move.
+      if (o !== pushed && world._pushForce[s] > 0 && world._type[o] === DYNAMIC) {
+        shove(world, o, nx, ny, nz, world._pushForce[s] * dt);
+        pushed = o;
+      }
       stop(rest, nx, ny, nz);
       stop(vel, nx, ny, nz);
     }
@@ -189,12 +205,48 @@ function move(world, s, dt) {
     }
   }
 
+  // Locked on an axis, it ends where it began along it, however it slid.
+  const held = world._lockMove[s];
+  if (held !== 0) {
+    for (let k = 0; k < 3; k++) {
+      if (held >> k & 1) { pos[k] = p[s3 + k]; vel[k] = 0; }
+    }
+  }
+
   // Where it found it can go, now, and still through the step; its velocity afterwards is its own.
   p[s3] = pos[0]; p[s3 + 1] = pos[1]; p[s3 + 2] = pos[2];
   v[s3] = 0; v[s3 + 1] = 0; v[s3 + 2] = 0;
   const own = world._walk;
   own[s3] = vel[0]; own[s3 + 1] = vel[1]; own[s3 + 2] = vel[2];
 }
+
+/**
+ * Pushes dynamic body o, met at hit's point with normal n (out of o): by the
+ * impulse along -n that brings o's speed there up to the character's into it
+ * (vel), within `most` N·s. Its effective mass there is
+ * 1 / (1/m + (r × d)·I⁻¹(r × d)), r from its centre of mass, d = -n.
+ */
+function shove(world, o, nx, ny, nz, most) {
+  const into = -(vel[0] * nx + vel[1] * ny + vel[2] * nz);
+  if (!(into > 0)) return;
+  const o3 = 3 * o, p = world._position, v = world._velocity, w = world._angular;
+  const rx = hit[4] - p[o3], ry = hit[5] - p[o3 + 1], rz = hit[6] - p[o3 + 2];
+  const along = -((v[o3] + w[o3 + 1] * rz - w[o3 + 2] * ry) * nx + (v[o3 + 1] + w[o3 + 2] * rx - w[o3] * rz) * ny
+    + (v[o3 + 2] + w[o3] * ry - w[o3 + 1] * rx) * nz);
+  if (!(into > along)) return;
+  // r × d, turned into o's own frame, where its inertia is diagonal.
+  const cx = -(ry * nz - rz * ny), cy = -(rz * nx - rx * nz), cz = -(rx * ny - ry * nx);
+  rotate(world._rotation, 4 * o, cx, cy, cz, true, lever);
+  const inv = world._invInertia;
+  const turns = inv[o3] * lever[0] * lever[0] + inv[o3 + 1] * lever[1] * lever[1] + inv[o3 + 2] * lever[2] * lever[2];
+  let j = (into - along) / (world._invMass[o] + turns);
+  if (j > most) j = most;
+  world._wake(o);
+  const im = world._invMass[o];
+  v[o3] -= nx * j * im; v[o3 + 1] -= ny * j * im; v[o3 + 2] -= nz * j * im;
+  world._turn(o, cx * j, cy * j, cz * j);
+}
+const lever = new Float64Array(3);
 
 /** The walkable ground within `reach` below the character, from where it is now, into hit; its slot or -1. */
 function under(world, s, reach) {

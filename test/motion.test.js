@@ -291,3 +291,54 @@ test('moveTo brings a kinematic body to the pose given, to rounding, however far
   assert.ok(Math.abs(paddle.velocity[0] - 3) < 1e-9);
   assert.ok(box.position[0] > 1.5 && Math.abs(box.velocity[0] - 3) < 0.01, `the box at ${box.position[0]} m, ${box.velocity[0]} m/s`);
 });
+
+test('lockPosition holds a body on its axes, and what rests on it or hits it', () => {
+  const held = [true, true, true];
+  // What rests on a held body stays; what is thrown at one stops at it.
+  for (const mass of [1, 10000]) {
+    const world = new World({ sleeping: false });
+    const shelf = world.addBody({ size: [2, 0.5, 2], position: [0, 3, 0], lockPosition: held, lockRotation: held });
+    const box = world.addBody({ size: [1, 1, 1], mass, position: [0, 3.75, 0] });
+    for (let s = 0; s < 300; s++) world.step(1 / 60);
+    assert.deepEqual([...shelf.position], [0, 3, 0]);
+    assert.ok(Math.abs(box.position[1] - 3.75) < 2e-4, `${mass} kg rests at ${box.position[1]}`);
+  }
+  const world = new World({ gravity: [0, 0, 0] });
+  const plate = world.addBody({ size: [0.1, 2, 2], mass: 50, lockPosition: held, lockRotation: held });
+  const ball = world.addBody({ shape: 'sphere', radius: 0.2, mass: 5, position: [-2, 0, 0], velocity: [100, 0, 0] });
+  let far = -9;
+  for (let s = 0; s < 60; s++) { world.step(1 / 60); far = Math.max(far, ball.position[0]); }
+  assert.ok(far < -0.24, `the ball reached ${far}`);
+  assert.deepEqual([...plate.position], [0, 0, 0]);
+  // Free along x, set and pushed along all three, it moves along x alone, and reads so at once.
+  const rail = new World();
+  const car = rail.addBody({ size: [1, 1, 1], position: [0, 5, 0], lockPosition: [false, true, true] });
+  car.setVelocity(1, 5, 7);
+  assert.deepEqual([...car.velocity], [1, 0, 0]);
+  car.applyImpulse([1000, 1000, 1000], [0, 5.5, 0]);
+  assert.deepEqual([car.velocity[1], car.velocity[2]], [0, 0]);
+  for (let s = 0; s < 60; s++) rail.step(1 / 60);
+  assert.ok(car.position[0] > 1.5);
+  assert.deepEqual([car.position[1], car.position[2]], [5, 0]);
+  // By hand it goes where it is told, and reads back; removal clears the count.
+  car.setPosition(0, 2, 2);
+  rail.step(1 / 60);
+  assert.deepEqual([car.position[1], car.position[2]], [2, 2]);
+  assert.deepEqual(rail.bodyOf(car).lockPosition, [false, true, true]);
+  rail.remove(car);
+  assert.equal(rail._lockMoveCount, 0);
+});
+
+test('lockPosition keeps a scene on its plane to the bit, at any depth, off an angled wall, a character too', () => {
+  const world = new World();
+  world.addBody({ type: 'static', size: [40, 1, 8], position: [0, -0.5, 0] });
+  world.addBody({ type: 'static', size: [1, 6, 6], position: [6, 3, 0], rotation: [0, 0.2588, 0, 0.9659] });
+  const plane = [false, false, true], spin = [true, true, false], bodies = [];
+  for (let k = 0; k < 12; k++) {
+    bodies.push(world.addBody({ ...(k % 2 ? { shape: 'sphere', radius: 0.4 } : {}), position: [k - 4, 1 + k * 0.3, (k - 6) * 0.1], velocity: [4, 0, 0], lockPosition: plane, lockRotation: spin }));
+  }
+  const hero = world.addBody({ type: 'character', shape: 'capsule', radius: 0.3, height: 1.8, position: [-3, 0.9, 0.2], lockPosition: plane });
+  for (let s = 0; s < 300; s++) { hero.setVelocity(3, hero.velocity[1], 1); world.step(1 / 60); }
+  bodies.forEach((b, k) => assert.equal(b.position[2], (k - 6) * 0.1));
+  assert.equal(hero.position[2], 0.2);
+});

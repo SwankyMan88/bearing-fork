@@ -751,10 +751,20 @@ theirs; `ShapeType` for the type `Shape`.
 
 ### After 1.0
 
-- **2D**, as a separate module with the same conventions (rule 106), shipped in this package as
-  `bearing-physics/2d` (`World2D`, `Body2D`, `Joint2D`, as Winding names `Camera2D`). Units
-  settled (2026-11-03): metres, with Winding's 2D axes, y down and positive angles clockwise.
-  Scoped at about 9.5 milestones, joints the largest; not started until a 2D game is planned.
+- **2D**, under way (2026-11-04, see the log): `bearing-physics/2d`, `src/2d/`, `World2D`, `Body2D`,
+  `docs/API-2D.md`, sharing `src/core/` and copying no hot code. Pixels, y down, positive angles
+  clockwise, as Winding and Godot; gravity `[0, 980]` and density 0.1 kg/px², 100 px to the metre.
+  Metres with y up are a matter of setting gravity and density: tolerances follow body size.
+  1. **Bodies:** shapes, mass, motion, no collisions. Done when falling and spinning match the
+     exact sums, every error is tested, and a stored hash holds the bits.
+  2. **Collision and solver:** a 10-box stack stands; a ball bounces and settles.
+  3. **Pairs and sleeping:** thousands of bodies; a pile sleeps and costs nothing.
+  4. **`tilemap`, `chain`, `compound` contacts:** 5,000 shards on a tilemap mined live, no catching on
+     seams.
+  5. **Queries, events, sensors:** the 3D checks.
+  6. **Character bodies ✅:** walks, climbs and jumps on tiles (2026-11-04). 1.3.0 follows, on
+     Nolan's word.
+  7. After that: joints, continuous collision, save and load, debug lines, workers, the comparison.
 - Not in Bearing: a vehicle controller and a ragdoll builder. Arcade handling and a humanoid from
   a config file are game feel, built from raycasts, forces, joints and pose motors Bearing already
   gives, so they belong in the games' shared foundation (Nolan, 2026-10-30: these updates must
@@ -831,6 +841,7 @@ Each milestone that adds API is a minor version. Fixes between them are patches.
 | 0.14.0 | 18, 19, 20 | The first release, 2026-11-02 (Nolan chose to start at the planned number): everything through joint forces, with 19 and 20 in it. |
 | 1.0.0 | 21 | Released 2026-11-03: the API gone through and made to last, the determinism hash on Bun. |
 | 1.1.0 | — | Released 2026-11-03: impact events, groups, `ignore` lists, `body.moveTo`. |
+| 1.3.0 | — | Released 2026-11-04: the 2D module, elliptical joint cones, characters that push, `lockPosition`, the first-impact note. 1.2.0 was prepared and never released. |
 
 ### How a release is made
 
@@ -1059,3 +1070,18 @@ Winding's way, copied before the first one:
   bodies already touching (the battle sim's damage), groups, `ignore` lists and `body.moveTo`.
   Left until a game asks: per-body sleep, listing bodies and joints, more contact detail and
   friction per compound part; elliptical joint cones until a ragdoll's limits look wrong.
+- **2026-11-03.** 1.2.0 made ready, at Nolan's word ("Approved as recommended, go ahead"): elliptical
+  cones with `swing`, characters' `pushForce`, and the note on the first steps' compiling, after
+  probing the games' scenes (a 300-capsule horde at 2.6 ms a step; an 80-brick jointed wall at
+  2.4 ms). Found and left for 1.2.1: a box resting on two single points swings about the line
+  between them, and the contact solve feeds the swing more than rolling resistance takes out (more
+  substeps, more gain), so one mixed heap in six sleeps at 30-40 s rather than 10-15.
+- **2026-11-04.** 2D begun, at Nolan's word ("I do want twodee code"; plan "Approved as recommended"),
+  for a tile game of his with blocks that break into pixel-shaped pieces. The units decision of the
+  day before is reversed: metres with y down matched no popular engine, and the case against pixels
+  was overstated. A 10-box stack at 100 units to the metre, y flipped, moved, slept and rested to
+  the printed digit as in metres, so pixels cost nothing and match Winding, Godot and Phaser.
+- **2026-11-04.** 1.3.0 released, at Nolan's word ("Approved as recommended, go ahead with 1.3.0").
+  1.2.0's pull request was refused by the permission check and 2D had landed on `develop` by then,
+  so 1.2.0 never shipped and its section folded into 1.3.0. The 2D module's steps 1-6 are in it. The
+  swing left for 1.2.1 is now for 1.3.1.

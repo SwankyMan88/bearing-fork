@@ -71,7 +71,7 @@ export const ROTATION = 5;
 const DYNAMIC = 0;   // World's type code
 const USED = 1;      // Slots' state for a slot in use
 
-const OPTIONS = ['type', 'a', 'b', 'anchor', 'anchorB', 'axis', 'min', 'max', 'length', 'cone', 'target',
+const OPTIONS = ['type', 'a', 'b', 'anchor', 'anchorB', 'axis', 'min', 'max', 'length', 'cone', 'swing', 'target',
   'motorSpeed', 'motorForce', 'frictionForce', 'frequency', 'dampingRatio', 'collide'];
 /** Options every joint has. */
 const SHARED = ['type', 'a', 'b', 'collide'];
@@ -79,17 +79,17 @@ const SHARED = ['type', 'a', 'b', 'collide'];
 const DRIVE = ['target', 'motorForce', 'frictionForce', 'frequency', 'dampingRatio'];
 const OWN = [
   ['anchor', 'anchorB'],
-  ['anchor', 'anchorB', 'axis', 'min', 'max', 'cone', ...DRIVE],
+  ['anchor', 'anchorB', 'axis', 'min', 'max', 'cone', 'swing', ...DRIVE],
   ['anchor', 'anchorB', 'axis', 'min', 'max', 'motorSpeed', ...DRIVE],
   ['anchor', 'anchorB', 'axis', 'min', 'max', 'motorSpeed', ...DRIVE],
   ['anchor', 'anchorB', 'length', 'min', 'max', 'frequency', 'dampingRatio'],
-  ['axis', 'cone', ...DRIVE],
+  ['axis', 'cone', 'swing', ...DRIVE],
 ];
 
-// What `given` records: whether min, max, anchorB and a target were given, or
-// follow their defaults (which for a distance joint follow its length and
-// spring; with no target, a motor drives a speed).
-const MIN = 1, MAX = 2, ANCHOR_B = 4, TARGET = 8;
+// What `given` records: whether min, max, anchorB, a target and swing were
+// given, or follow their defaults (which for a distance joint follow its
+// length and spring; with no target, a motor drives a speed).
+const MIN = 1, MAX = 2, ANCHOR_B = 4, TARGET = 8, SWING = 16;
 
 // Where each accumulated impulse is kept, in a joint's 11: the linear and
 // angular impulses as world vectors, then one number per scalar row. A ball
@@ -111,7 +111,10 @@ const COLUMNS = [
   ['max', Float64Array, 1],
   ['given', Uint8Array, 1],
   ['length', Float64Array, 1],
-  ['cone', Float64Array, 1],
+  ['cone', Float64Array, 1],       // the most `axis` may swing toward `swing`, radians
+  ['cone2', Float64Array, 1],      // and at right angles to it: the same for a round cone
+  ['swing', Float64Array, 3],      // swing as last given, world space, if `given` has SWING: what jointOf reads back
+  ['facing', Float64Array, 2],     // swing's direction in b's frame of the joint: its y and z parts, unit length
   ['motorSpeed', Float64Array, 1],
   ['motorForce', Float64Array, 1],
   ['friction', Float64Array, 1],  // the frictionForce option
@@ -179,7 +182,7 @@ export class Joints {
     // fields by computed name becomes a dictionary (World's FAST PROPERTIES).
     this.type = null; this.a = null; this.b = null; this.localA = null; this.localB = null;
     this.frameA = null; this.frameB = null; this.axis = null; this.min = null; this.max = null; this.given = null;
-    this.length = null; this.cone = null; this.motorSpeed = null; this.motorForce = null;
+    this.length = null; this.cone = null; this.cone2 = null; this.swing = null; this.facing = null; this.motorSpeed = null; this.motorForce = null;
     this.friction = null; this.frequency = null; this.dampingRatio = null; this.target = null;
     this.collide = null; this.next = null; this.impulse = null; this.force = null; this.torque = null; this.list = null;
     this.kept = null; this.work = null; this.union = null; this.label = null; this.of = null;
@@ -327,6 +330,7 @@ export function addJoint(world, given) {
   const axis = has('axis') ? direction(caller, 'axis', o.axis) : [0, 1, 0];
   const spec = settings(caller, type, o, DEFAULTS, between(anchor, anchorB));
   const collide = has('collide') ? flag(caller, 'collide', o.collide) : false;
+  const swing = has('swing') && o.swing !== null ? across(caller, direction(caller, 'swing', o.swing), axis) : null;
 
   const J = world._joints;
   const j = J.take(caller);
@@ -339,6 +343,7 @@ export function addJoint(world, given) {
   place(world, j, anchor, anchorB, true, true);
   orient(world, j, axis);
   J.axis.set(axis, 3 * j);
+  if (type === BALL || type === ROTATION) face(world, J, j, swing);
   link(world, j, a, 0);
   if (b >= 0) link(world, j, b, 1);
   // Joined, they may no longer rest as they were (rule 36).
@@ -381,10 +386,25 @@ export function setJoint(world, joint, changes) {
   ends[1] = anchorB ?? (anchor && type !== DISTANCE && (J.given[j] & ANCHOR_B) === 0 ? anchor : worldAnchor(world, j, 1));
   const spec = settings(caller, type, o, base, between(ends[0], ends[1]));
   const collide = has('collide') ? flag(caller, 'collide', o.collide) : J.collide[j] === 1;
+  // swing as it will be, checked against the axis as it will be: given anew,
+  // kept as last given, or none (null) for the default.
+  const turned = type === BALL || type === ROTATION;
+  let swing = null, refaced = turned && (type !== was || axis !== null);
+  if (turned) {
+    if (has('swing') && o.swing !== null) {
+      swing = direction(caller, 'swing', o.swing);
+      if (!((J.given[j] & SWING) !== 0 && equal(swing, J.swing, 3 * j))) refaced = true;
+    } else if (has('swing')) {
+      refaced ||= (J.given[j] & SWING) !== 0;
+    } else if (type === was && (J.given[j] & SWING) !== 0) {
+      swing = [J.swing[3 * j], J.swing[3 * j + 1], J.swing[3 * j + 2]];
+    }
+    if (swing !== null) across(caller, swing, axis ?? worldAxis(world, j));
+  }
 
   // Everything checked: now written. What a change of shape or stop makes of
   // the impulses the joint remembers is no longer known, so they start over.
-  const limits = spec.min !== base.min || spec.max !== base.max || (spec.given & (MIN | MAX)) !== (base.given & (MIN | MAX)) || spec.cone !== base.cone;
+  const limits = spec.min !== base.min || spec.max !== base.max || (spec.given & (MIN | MAX)) !== (base.given & (MIN | MAX)) || spec.cone !== base.cone || spec.cone2 !== base.cone2;
   if (type !== was || anchor || anchorB || axis) J.impulse.fill(0, j * IMPULSES, j * IMPULSES + IMPULSES);
   else if (limits) { const i = j * IMPULSES; J.impulse[i + LOWER] = 0; J.impulse[i + UPPER] = 0; J.impulse[i + CONE] = 0; }
   J.type[j] = type;
@@ -406,6 +426,8 @@ export function setJoint(world, joint, changes) {
     orient(world, j, axis);
     J.axis.set(axis, 3 * j);
   }
+  if (refaced) face(world, J, j, swing);
+  else if (swing !== null) J.given[j] |= SWING;
   const apart = J.collide[j] === 0 && collide;
   J.collide[j] = collide ? 1 : 0;
   // Let go of each other, the two may now collide: the broadphase is asked
@@ -431,7 +453,10 @@ export function jointOf(world, j) {
     out.min = s.given & MIN ? s.min : null;
     out.max = s.given & MAX ? s.max : null;
   }
-  if (type === BALL || type === ROTATION) out.cone = s.cone;
+  if (type === BALL || type === ROTATION) {
+    out.cone = s.cone === s.cone2 ? s.cone : [s.cone, s.cone2];
+    out.swing = (J.given[j] & SWING) !== 0 ? [J.swing[3 * j], J.swing[3 * j + 1], J.swing[3 * j + 2]] : null;
+  }
   if (type !== FIXED && type !== DISTANCE) out.target = s.target;
   if (type === HINGE || type === SLIDER) out.motorSpeed = s.motorSpeed;
   if (type !== FIXED && type !== DISTANCE) { out.motorForce = s.motorForce; out.frictionForce = s.frictionForce; }
@@ -474,7 +499,7 @@ export function apart(world, a, b) {
 const DEFAULTS = Object.freeze({
   min: -Infinity, max: Infinity, given: 0, length: 0,
   // A ball joint swings freely unless given a cone.
-  cone: Math.PI,
+  cone: Math.PI, cone2: Math.PI,
   motorSpeed: 0, motorForce: 0,
   // No target: a motor drives a speed.
   target: null,
@@ -492,13 +517,13 @@ function read(J, j) {
   const target = (J.given[j] & TARGET) === 0 ? null
     : turned ? [J.target[t], J.target[t + 1], J.target[t + 2], J.target[t + 3]] : J.target[t];
   return {
-    min: J.min[j], max: J.max[j], given: J.given[j] & (MIN | MAX | TARGET), length: J.length[j], cone: J.cone[j], target,
+    min: J.min[j], max: J.max[j], given: J.given[j] & (MIN | MAX | TARGET), length: J.length[j], cone: J.cone[j], cone2: J.cone2[j], target,
     motorSpeed: J.motorSpeed[j], motorForce: J.motorForce[j], frictionForce: J.friction[j], frequency: J.frequency[j], dampingRatio: J.dampingRatio[j],
   };
 }
 
 function write(J, j, s) {
-  J.min[j] = s.min; J.max[j] = s.max; J.length[j] = s.length; J.cone[j] = s.cone;
+  J.min[j] = s.min; J.max[j] = s.max; J.length[j] = s.length; J.cone[j] = s.cone; J.cone2[j] = s.cone2;
   J.motorSpeed[j] = s.motorSpeed; J.motorForce[j] = s.motorForce; J.friction[j] = s.frictionForce;
   J.frequency[j] = s.frequency; J.dampingRatio[j] = s.dampingRatio;
   const t = s.target, o = 4 * j;
@@ -526,9 +551,16 @@ function settings(caller, type, o, base, gap) {
   if (type === DISTANCE && (base === DEFAULTS || o.length === null)) s.length = gap;
   if (has('length') && o.length !== null) s.length = atLeastZero(caller, 'length', o.length);
   if (has('cone')) {
-    const c = o.cone;
-    if (typeof c !== 'number' || !(c >= 0 && c <= Math.PI)) fail(caller, `cone must be an angle from 0 to π, in radians, got ${show(c)}`);
-    s.cone = c;
+    // One angle is a round cone; two, an ellipse, which an angle of 0 would
+    // flatten to a line, a hinge's job.
+    const c = o.cone, angle = (x, least) => typeof x === 'number' && x >= least && x <= Math.PI;
+    if (angle(c, 0)) {
+      s.cone = c; s.cone2 = c;
+    } else if (Array.isArray(c) && c.length === 2 && angle(c[0], Number.MIN_VALUE) && angle(c[1], Number.MIN_VALUE)) {
+      s.cone = c[0]; s.cone2 = c[1];
+    } else {
+      fail(caller, `cone must be an angle from 0 to π, or two above 0, in radians, got ${show(c)}`);
+    }
   }
   // null is a value, as for min and max: no target again.
   if (o.target === null) s.target = null;
@@ -591,6 +623,53 @@ function low(type, given, min, length, frequency) {
 function high(type, given, max, length, frequency) {
   if (given & MAX) return max;
   return type === DISTANCE && frequency === 0 ? length : Infinity;
+}
+
+/**
+ * `swing`, checked to stand at an angle to `axis`: square to it is what it
+ * means, and along it, it names no way round. Lost as twistAxis() calls a
+ * turn lost, within 2^-20 of its length squared.
+ */
+function across(caller, swing, axis) {
+  const l2 = axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2];
+  const d = (swing[0] * axis[0] + swing[1] * axis[1] + swing[2] * axis[2]) / l2;
+  const x = swing[0] - d * axis[0], y = swing[1] - d * axis[1], z = swing[2] - d * axis[2];
+  if (!(x * x + y * y + z * z > TWIST_LOST * (swing[0] * swing[0] + swing[1] * swing[1] + swing[2] * swing[2]))) {
+    fail(caller, `swing must be at an angle to axis, got ${show(swing)}`);
+  }
+  return swing;
+}
+
+/** Joint j's axis on b in the world now, from b's frame of it; leaves that frame's axes in X2, Y2 and Z2. */
+function worldAxis(world, j) {
+  const J = world._joints, b = J.b[j];
+  if (b >= 0) multiply(world._rotation, 4 * b, J.frameB, 4 * j, QB, 0);
+  else for (let k = 0; k < 4; k++) QB[k] = J.frameB[4 * j + k];
+  axes(QB, X2, Y2, Z2);
+  return [X2[0], X2[1], X2[2]];
+}
+
+/**
+ * Sets which way joint j's cone's first angle faces: `swing` (world space,
+ * where the bodies are now), or, null, the world's x, y or z most at right
+ * angles to the axis (the first on a tie); made square to b's axis and kept
+ * in b's frame of the joint, so it turns with b.
+ */
+function face(world, J, j, swing) {
+  const A = worldAxis(world, j);
+  let s = swing;
+  if (s === null) {
+    const m0 = Math.abs(A[0]), m1 = Math.abs(A[1]), m2 = Math.abs(A[2]);
+    s = m0 <= m1 && m0 <= m2 ? [1, 0, 0] : m1 <= m2 ? [0, 1, 0] : [0, 0, 1];
+    J.given[j] &= ~SWING;
+  } else {
+    J.swing.set(s, 3 * j);
+    J.given[j] |= SWING;
+  }
+  const y = s[0] * Y2[0] + s[1] * Y2[1] + s[2] * Y2[2], z = s[0] * Z2[0] + s[1] * Z2[1] + s[2] * Z2[2];
+  const l = Math.sqrt(y * y + z * z);
+  J.facing[2 * j] = y / l;
+  J.facing[2 * j + 1] = z / l;
 }
 
 /** Whether vector v is the 3 numbers of `list` from `at`, exactly. */
@@ -725,6 +804,7 @@ let ima = 0, imb = 0;
 const RA = new Float64Array(3), RB = new Float64Array(3), D = new Float64Array(3);
 const QA = new Float64Array(4), QB = new Float64Array(4), REL = new Float64Array(4);
 const A1 = new Float64Array(3), P1 = new Float64Array(3), P2 = new Float64Array(3), A2 = new Float64Array(3);
+const X2 = new Float64Array(3), Y2 = new Float64Array(3), Z2 = new Float64Array(3);   // b's frame of the joint: coneRow(), face()
 /** Up to six rows, 9 numbers each: n (linear, on b; -n on a), then the angular parts on a and on b. */
 const ROWS = new Float64Array(54);
 const C = new Float64Array(3), ACC = new Float64Array(3), LAMBDA = new Float64Array(3), RHS = new Float64Array(3);
@@ -809,9 +889,9 @@ function warmJoints(world, J, from, to) {
     } else if (type === ROTATION) {
       // What holds it, or drives it, or its friction: all one angular impulse.
       angles(acc, o + ANG);
-      if (gives(J, j) && J.cone[j] < Math.PI) {
+      if (gives(J, j) && coned(J, j)) {
         frames(world, j);
-        if (coneAxis(0) >= 0) apply(0, -acc[o + CONE]);
+        if (!Number.isNaN(coneRow(J, j))) apply(0, -acc[o + CONE]);
       }
     } else {
       for (let k = 0; k < 3; k++) {
@@ -829,7 +909,7 @@ function warmJoints(world, J, from, to) {
       } else if (type === BALL && swings(J, j)) {
         frames(world, j);
         if (twistAxis(0)) apply(0, acc[o + LOWER] - acc[o + UPPER]);
-        if (coneAxis(0) >= 0) apply(0, -acc[o + CONE]);
+        if (!Number.isNaN(coneRow(J, j))) apply(0, -acc[o + CONE]);
       }
     }
     save(world, j);
@@ -900,7 +980,7 @@ function solveRange(world, J, from, to, h, bias, keep) {
         if (swings(J, j)) {
           if (!aims) frames(world, j);
           twistLimits(J, j, acc, o, h, bias);
-          if (J.cone[j] < Math.PI) coneLimit(J, j, acc, o, h, bias);
+          if (coned(J, j)) coneLimit(J, j, acc, o, h, bias);
         }
         if (!held) holdPoint(acc, o, bias);
         break;
@@ -943,7 +1023,7 @@ function solveRange(world, J, from, to, h, bias, keep) {
           const most = J.motorForce[j] > 0 ? J.motorForce[j] : J.friction[j];
           if (aimed(J, j)) turnDrive(world, J, j, most * h, h, bias, acc, o, turned(world, J, j, true, recall, store));
           else ballFriction(most * h, acc, o, turned(world, J, j, false, recall, store));
-          if (J.cone[j] < Math.PI) coneLimit(J, j, acc, o, h, bias);
+          if (coned(J, j)) coneLimit(J, j, acc, o, h, bias);
         } else {
           holdAngles(acc, o, bias);
         }
@@ -997,7 +1077,7 @@ function idle(J, j, type) {
 /** Whether joint slot j keeps its work (KEPT WORK). */
 function keeping(J, j, type, held) {
   if (type === BALL) return held && gives(J, j) && !swings(J, j);
-  if (type === ROTATION) return gives(J, j) && !(J.cone[j] < Math.PI);
+  if (type === ROTATION) return gives(J, j) && !coned(J, j);
   if (type === HINGE) return held && gives(J, j) && (J.given[j] & (MIN | MAX)) === 0;
   return false;
 }
@@ -1390,7 +1470,12 @@ function aimed(J, j) {
 
 /** Whether a ball joint has a limit, and so needs its axes. */
 function swings(J, j) {
-  return J.cone[j] < Math.PI || (J.given[j] & (MIN | MAX)) !== 0;
+  return coned(J, j) || (J.given[j] & (MIN | MAX)) !== 0;
+}
+
+/** Whether a ball or rotation joint's cone limits it anywhere. */
+function coned(J, j) {
+  return J.cone[j] < Math.PI || J.cone2[j] < Math.PI;
 }
 
 // ---- groups and workers ----
@@ -1507,7 +1592,7 @@ export const WORK = {
   least: [...CONTACT_WORK.least, 2, 2, 2],
   columns: [...CONTACT_WORK.columns, '_invIt', '_inertia', '_lock'],
   pairs: CONTACT_WORK.pairs,
-  joints: ['type', 'a', 'b', 'localA', 'localB', 'frameA', 'frameB', 'min', 'max', 'given', 'length', 'cone',
+  joints: ['type', 'a', 'b', 'localA', 'localB', 'frameA', 'frameB', 'min', 'max', 'given', 'length', 'cone', 'cone2', 'facing',
     'motorSpeed', 'motorForce', 'friction', 'frequency', 'dampingRatio', 'target', 'impulse', 'kept', 'work',
     'starts', 'grouped', 'force', 'torque'],
   forest: ['joint', 'rows', 'row', 'rhs', 'scale', 'side', 'jointInverse', 'jac', 'up', 'down', 'fresh', 'inTree',
@@ -2185,9 +2270,47 @@ function twistLimits(J, j, acc, o, h, bias) {
 }
 
 function coneLimit(J, j, acc, o, h, bias) {
-  const swing = coneAxis(0);
-  if (swing < 0) return;
-  stop(0, J.cone[j] - swing, -1, acc, o + CONE, h, bias);
+  const c = coneRow(J, j);
+  if (!Number.isNaN(c)) stop(0, c, -1, acc, o + CONE, h, bias);
+}
+
+/**
+ * Joint j's cone row at 0, and how far a's axis is inside the cone (NaN with
+ * nothing to measure). Round, the row turns a's axis straight back toward b's.
+ * An ellipse, its two angles toward `swing` (u, kept in b's frame QB) and at
+ * right angles (v = A2 × u), is a radius r(φ) = ab / √(b² cos² φ + a² sin² φ)
+ * at each direction φ round b's axis, and the limit θ - r(φ) ≤ 0, θ the
+ * swing. Its row is that limit's own rate: θ' = ω·s and φ' = -ω·(A2 - cos θ
+ * A1) / sin² θ, ω b's spin against a's and s the round row, so the row is
+ * s + r'(φ) (A2 - cos θ A1) / sin² θ, square to the ellipse's edge, as
+ * Bullet's adjustSwingAxisToUseEllipseNormal makes it, so the edge is a rim
+ * an arm slides round, as a shoulder's is. Pushed straight back toward the
+ * centre instead, it held the edge tighter (1e-9 rad past against 1e-3 at 15
+ * rad/s) but gripped: an arm swept round the rim stopped dead, where this
+ * kept 41% of a 2 rad/s sweep's energy over 5 s, and one pressed at an angle
+ * stayed where it was pressed rather than sliding round to the wide side.
+ */
+function coneRow(J, j) {
+  const swing = coneAxis(0), a = J.cone[j], b = J.cone2[j];
+  if (swing < 0) return NaN;
+  if (a === b) return a - swing;
+  const cosine = A1[0] * A2[0] + A1[1] * A2[1] + A1[2] * A2[2], s2 = 1 - cosine * cosine;
+  // Exactly opposed, coneAxis took an axis at right angles: no one way round, so the wider edge.
+  if (!(s2 > 0)) return (a > b ? a : b) - swing;
+  // b's frame of the joint, from frames(): its y and z, from which u.
+  axes(QB, X2, Y2, Z2);
+  const fy = J.facing[2 * j], fz = J.facing[2 * j + 1];
+  const ux = fy * Y2[0] + fz * Z2[0], uy = fy * Y2[1] + fz * Z2[1], uz = fy * Y2[2] + fz * Z2[2];
+  const vx = A2[1] * uz - A2[2] * uy, vy = A2[2] * ux - A2[0] * uz, vz = A2[0] * uy - A2[1] * ux;
+  // Which way a's axis leans off b's: its part square to A2, over sin θ.
+  const n = Math.sqrt(s2), dx = (A1[0] - cosine * A2[0]) / n, dy = (A1[1] - cosine * A2[1]) / n, dz = (A1[2] - cosine * A2[2]) / n;
+  const c = dx * ux + dy * uy + dz * uz, s = dx * vx + dy * vy + dz * vz;
+  const D = b * b * c * c + a * a * s * s, r = a * b / Math.sqrt(D), k = -r * (a * a - b * b) * s * c / D / s2;
+  V3[0] += k * (A2[0] - cosine * A1[0]);
+  V3[1] += k * (A2[1] - cosine * A1[1]);
+  V3[2] += k * (A2[2] - cosine * A1[2]);
+  turning(0, V3);
+  return r - swing;
 }
 
 function sliderLimits(J, j, acc, o, h, bias) {
