@@ -43,6 +43,10 @@ takes, what it returns and what it throws, with an index to look any of them up 
 
 ## What it does
 
+In three dimensions, as below, and in two: [`bearing-physics/2d`](docs/API-2D.md) has the same calls
+in pixels with y down, for boxes, circles, capsules, polygons and compounds on tilemaps you can
+mine as the game runs, and characters that walk on them.
+
 - **Bodies**: dynamic, static, kinematic and character; boxes, spheres, capsules, convex hulls and
   compounds, with mass, inertia and centre of mass worked out from the shape. Forces, torques and
   impulses, damping, gravity scale and rotation locks. A lopsided body tumbles as a real one does,
@@ -170,7 +174,7 @@ import are the files in this repository.
 
 ```html
 <script type="module">
-  import { World } from 'https://cdn.jsdelivr.net/npm/bearing-physics@1.2.0/src/bearing.js';
+  import { World } from 'https://cdn.jsdelivr.net/npm/bearing-physics@1.3.0/src/bearing.js';
 </script>
 ```
 
@@ -190,8 +194,9 @@ import { World } from 'bearing-physics';
 <script type="importmap">
 {
   "imports": {
-    "bearing-physics": "https://cdn.jsdelivr.net/npm/bearing-physics@1.2.0/src/bearing.js",
-    "bearing-physics/": "https://cdn.jsdelivr.net/npm/bearing-physics@1.2.0/src/"
+    "bearing-physics": "https://cdn.jsdelivr.net/npm/bearing-physics@1.3.0/src/bearing.js",
+    "bearing-physics/2d": "https://cdn.jsdelivr.net/npm/bearing-physics@1.3.0/src/2d/bearing2d.js",
+    "bearing-physics/": "https://cdn.jsdelivr.net/npm/bearing-physics@1.3.0/src/"
   }
 }
 </script>
@@ -250,9 +255,10 @@ PlayCanvas, Pixi and Winding.
 - **Stable, not frozen.** Through 1.x, code written against the [API reference](docs/API.md) keeps
   working; results, measured figures and error wording may still change between versions (see
   [What 1.x promises](docs/API.md#promises)).
-- **3D only.** There is no 2D module yet. Bodies locked to turn only in one plane, with
-  [`lockRotation`](docs/API.md#world-addbody), stay in it to the bit, but they still cost what 3D
-  bodies cost.
+- **The [2D module](docs/API-2D.md) has less in it than 3D:** no joints, save and load, debug lines
+  or workers yet, and it isn't in [How it compares](#how-it-compares). It has no continuous
+  collision of its own: contacts look ahead along a body's motion, which stops a ball on a thin wall
+  or tile at 100,000 px/s, but a thin body spinning fast isn't swept as in 3D.
 - **Rigid bodies only.** No soft bodies, cloth or fluids. No vehicle or ragdoll builder: a car or a
   ragdoll is bodies and joints put together by your own code.
 - **Meshes and heightfields are static or kinematic.** Triangles enclose no volume, so they have

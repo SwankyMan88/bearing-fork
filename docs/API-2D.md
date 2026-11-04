@@ -1,9 +1,10 @@
 # Bearing 2D API reference
 
 `bearing-physics/2d` is Bearing for a flat world: the same calls, options and errors as
-[the 3D reference](API.md), in pixels. This page lists every call. It grows as the 2D module does:
-for now, boxes, circles, capsules, polygons and compounds collide, stack, roll and sleep, thousands
-at a time, on tilemaps and chains, with rays, shape casts, contact events and sensors.
+[the 3D reference](API.md), in pixels. This page lists every call. Boxes, circles, capsules,
+polygons and compounds collide, stack, roll and sleep, thousands at a time, on tilemaps and chains,
+with rays, shape casts, contact events, sensors and character bodies. Joints, continuous collision,
+save and load, debug lines and workers aren't in it yet.
 
 ```js
 import { World2D } from 'bearing-physics/2d';

@@ -841,7 +841,7 @@ Each milestone that adds API is a minor version. Fixes between them are patches.
 | 0.14.0 | 18, 19, 20 | The first release, 2026-11-02 (Nolan chose to start at the planned number): everything through joint forces, with 19 and 20 in it. |
 | 1.0.0 | 21 | Released 2026-11-03: the API gone through and made to last, the determinism hash on Bun. |
 | 1.1.0 | — | Released 2026-11-03: impact events, groups, `ignore` lists, `body.moveTo`. |
-| 1.2.0 | — | Elliptical joint cones, characters that push, `lockPosition`, the first-impact note. |
+| 1.3.0 | — | Released 2026-11-04: the 2D module, elliptical joint cones, characters that push, `lockPosition`, the first-impact note. 1.2.0 was prepared and never released. |
 
 ### How a release is made
 
@@ -1081,3 +1081,7 @@ Winding's way, copied before the first one:
   day before is reversed: metres with y down matched no popular engine, and the case against pixels
   was overstated. A 10-box stack at 100 units to the metre, y flipped, moved, slept and rested to
   the printed digit as in metres, so pixels cost nothing and match Winding, Godot and Phaser.
+- **2026-11-04.** 1.3.0 released, at Nolan's word ("Approved as recommended, go ahead with 1.3.0").
+  1.2.0's pull request was refused by the permission check and 2D had landed on `develop` by then,
+  so 1.2.0 never shipped and its section folded into 1.3.0. The 2D module's steps 1-6 are in it. The
+  swing left for 1.2.1 is now for 1.3.1.

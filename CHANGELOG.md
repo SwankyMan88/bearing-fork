@@ -7,42 +7,45 @@ All notable changes to Bearing are recorded here. The format follows
 
 ## [Unreleased]
 
-### Added
+## [1.3.0] - 2026-11-04
 
-- **A 2D module, under way.** `bearing-physics/2d`: `World2D` and `Body2D`, in pixels with y down as
-  Winding's 2D view has it, and box, circle, capsule, polygon and compound bodies that weigh, move,
-  turn and take forces. They collide, stack, slide, bounce and roll, by the 3D solver's method, and
-  thousands at once sleep and cost nothing. A `tilemap` takes Winding's numbers, costs nothing for
-  its size, has no seams to catch on, and changes with `world.setTile`; a `chain` is a one-sided
-  line for slopes. Rays, shape casts, overlap tests, contact events with impacts, and sensors work
-  as in 3D. A `character` body walks, climbs tile steps and slopes, rides what it stands on and
-  pushes with a `pushForce`, and `world.groundOf` says what it stands on. See
-  [the 2D reference](docs/API-2D.md).
-
-## [1.2.0] - 2026-11-03
-
-Joints and characters closer to what the games ask of them. A ball joint's cone can be an
-ellipse, so a shoulder swings further forward than up, and its edge is a rim the limb slides
-round. A character can push what it walks into, as hard as it is allowed. A body can be locked
-along an axis as it could be about one, so a 3D scene can be played on one plane. And the
-reference says why the first impact in a session is slower than the rest, and what to do about
-it. No simulation results changed from 1.1.0 for anything 1.1.0 could build. Saves move to format
-15.
+Bearing in two dimensions, and joints and characters closer to what the games ask of them. There
+is a 2D module, `bearing-physics/2d`, in pixels with y down as Winding's and Godot's are: boxes,
+circles, capsules, polygons and compounds, tilemaps that change as they are mined, one-sided
+chains, queries, contact events, sensors and character bodies, with the same calls, options and
+errors as 3D. In 3D, a ball joint's cone can be an ellipse, so a shoulder swings further forward
+than up, and its edge is a rim the limb slides round. A character can push what it walks into, as
+hard as it is allowed. A body can be locked along an axis as it could be about one, so a 3D scene
+can be played on one plane. And the reference says why the first impact in a session is slower
+than the rest, and what to do about it. Version 1.2.0 was prepared and never released: all of it is
+here. No 3D simulation results changed from 1.1.0 for anything 1.1.0 could build. Saves move to
+format 15.
 
 ### Added
 
+- **A 2D module.** `bearing-physics/2d`: `World2D` and `Body2D`, in pixels with y down and angles
+  clockwise, 100 px to the metre by convention, as Godot; metres with y up are a matter of setting
+  gravity and density, since every tolerance follows body size. Box, circle, capsule, polygon and
+  compound bodies weigh, move, turn and take forces. They collide, stack, slide, bounce and roll,
+  by the 3D solver's method, and thousands at once sleep and cost nothing. A `tilemap` takes
+  Winding's numbers, costs nothing for its size, has no seams to catch on, and changes with
+  `world.setTile`; a `chain` is a one-sided line for slopes. Rays, shape casts, overlap tests,
+  contact events with impacts, and sensors work as in 3D. A `character` body walks, climbs tile
+  steps and slopes, rides what it stands on and pushes with a `pushForce`, and `world.groundOf`
+  says what it stands on. Joints, continuous collision, save and load, debug lines and workers
+  aren't in it yet. See [the 2D reference](docs/API-2D.md).
 - **Elliptical joint cones.** A ball or rotation joint's `cone` takes two angles, `[toward, across]`:
   how far `axis` may swing toward the new option `swing`, and at right angles to it, as a shoulder
   swings further forward than up. Its edge is a rim the axis slides round, as a frictionless one
   would. `swing` defaults to the world's x, y or z most at right angles to `axis`. One angle is
-  the round cone as before, to the bit. The save format is 13.
+  the round cone as before, to the bit.
 - **Characters can push.** Body option `pushForce`, characters only: the most a character pushes a
   dynamic body it walks into with, in newtons, so a player shoves a crate along as Jolt's
   characters do. It still stops at the crate each step, as at a wall, and follows as it gives way.
-  The default, 0, pushes nothing, as before. The save format is 14.
+  The default, 0, pushes nothing, as before.
 - **`lockPosition`.** Body option, the partner of `lockRotation`: the world axes a body's centre of
   mass never moves along. It keeps a 3D scene on one plane whatever hits it, and makes wheels on
-  fixed axles, lifts and sliding doors from one option. The save format is 15.
+  fixed axles, lifts and sliding doors from one option.
 
 ### Changed
 
@@ -506,8 +509,8 @@ version may still change it.
   continuous collision doesn't make a sensor see a body that passes through it within a step (it
   said a later version would).
 
-[Unreleased]: https://github.com/getlowarc/bearing/compare/v1.2.0...HEAD
-[1.2.0]: https://github.com/getlowarc/bearing/compare/v1.1.0...v1.2.0
+[Unreleased]: https://github.com/getlowarc/bearing/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/getlowarc/bearing/compare/v1.1.0...v1.3.0
 [1.1.0]: https://github.com/getlowarc/bearing/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/getlowarc/bearing/compare/v0.14.0...v1.0.0
 [0.14.0]: https://github.com/getlowarc/bearing/releases/tag/v0.14.0
