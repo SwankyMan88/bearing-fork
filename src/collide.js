@@ -412,14 +412,22 @@ function sphereBox(a, b, margin, out) {
  * third point only where it is deeper than both: segments that cross, or
  * that pass closest beyond the end of a's.
  *
- * An end point's separation is measured along the shared normal, which is
- * what the solver pushes along. That is the true gap only while the two
- * segments run alongside each other; for segments at an angle, an end point
- * sits off to the side of the normal through its partner on a, and the gap
- * along the normal understates the real one. So an end point is kept only
- * while it lies within the tolerance of that normal. Two capsules at any real
- * angle touch at one point, and get one, so they pivot as real logs do; once
- * they settle side by side, they get two and rest.
+ * An end is kept if its true gap, centre line to centre line less the radii,
+ * is within the tolerance of the closest pair's. Two capsules at any real
+ * angle have ends far apart, so they touch at one point and pivot as real
+ * logs do. Nearly side by side, the closest pair is a poor thing to rest on:
+ * a tilt of a few milliradians runs it the length of the capsule, the solver
+ * pushes where it was as the step began, and a push that lags the motion it
+ * restores feeds that motion, which is how a capsule came to rock for good.
+ * Its ends don't run about, and each is only a gap until it closes.
+ *
+ * Measured on 120 mixed heaps of 200, capsules and boxes and hulls: with the
+ * same rule in capsuleBox, not asleep after 40 s 9 -> 2, after 20 s 14 -> 3.
+ * Ends at the edge of the tolerance, wherever that falls along the segment,
+ * were measured no better than one point: those run about as well. So were
+ * taking the third point away here (13 over 20 s) and giving capsuleBox one
+ * (13 too): there the closest point is the one that runs about, and the two
+ * ends leave it at most the tolerance deeper than they say.
  */
 function capsuleCapsule(a, b, margin, tolerance, out) {
   segment(a, segA);
@@ -463,11 +471,8 @@ function capsuleCapsule(a, b, margin, tolerance, out) {
         const along = Math.max(-h, Math.min(h, k0 + k1 * u));
         const ax = a.center[0] + ya[3] * along, ay = a.center[1] + ya[4] * along, az = a.center[2] + ya[5] * along;
         const gx = bx - ax, gy = by - ay, gz = bz - az;
-        const normalGap = gx * n[0] + gy * n[1] + gz * n[2];
-        const separation = normalGap - ra - rb;
-        if (separation > margin) continue;
-        // How far off to the side of the normal through its partner, squared.
-        if (gx * gx + gy * gy + gz * gz - normalGap * normalGap > tolerance * tolerance) continue;
+        const separation = Math.sqrt(gx * gx + gy * gy + gz * gz) - ra - rb;
+        if (separation > closest + tolerance) continue;
         deepest = Math.min(deepest, separation);
         const m = ra + separation * 0.5;
         addPoint(out, ax + n[0] * m, ay + n[1] * m, az + n[2] * m, separation, 1 + e);
@@ -540,10 +545,44 @@ function capsuleBox(a, b, margin, tolerance, out) {
     const facing = sign(axis === 0 ? qx : axis === 1 ? qy : qz);
     if (clipToFace(b, axis, facing, r, margin, out, 0)) return;
   }
+  // Off an edge or a corner. A capsule lying across a box, past its edges, or
+  // along one of them, rests on a stretch and not at the closest point, for
+  // the reason capsuleCapsule gives. The gap along the segment has a kink only
+  // where the segment crosses one of the box's planes, so those and its ends
+  // are the places a stretch can end, and they don't run about.
+  let u0 = 2, u1 = -1;
+  for (let i = 0; i < 8 && a.half[1] > 0; i++) {
+    let u = i;
+    if (i > 1) {
+      const c = (i - 2) >> 1, d = local[3 + c] - local[c];
+      if (d === 0) continue;
+      u = ((i & 1 ? h[c] : -h[c]) - local[c]) / d;
+      if (!(u > 0 && u < 1)) continue;
+    }
+    if (gapToBox(u, h) > dist + tolerance) continue;
+    if (u < u0) u0 = u;
+    if (u > u1) u1 = u;
+  }
+  if (u1 > u0) {
+    for (let e = 0; e < 2; e++) {
+      const u = e === 0 ? u0 : u1, separation = gapToBox(u, h) - r, t = r + separation * 0.5;
+      const px = local[0] + (local[3] - local[0]) * u, py = local[1] + (local[4] - local[1]) * u, pz = local[2] + (local[5] - local[2]) * u;
+      toWorld(b, px + nlx * t, py + nly * t, pz + nlz * t);
+      addPoint(out, world[0], world[1], world[2], separation, 1 + e);
+    }
+    return;
+  }
   const separation = dist - r;
   const m = r + separation * 0.5;
   toWorld(b, sx + nlx * m, sy + nly * m, sz + nlz * m);
   addPoint(out, world[0], world[1], world[2], separation, 0);
+}
+
+/** How far the point u along the segment in `local` is from the box of half extents h. */
+function gapToBox(u, h) {
+  const x = local[0] + (local[3] - local[0]) * u, y = local[1] + (local[4] - local[1]) * u, z = local[2] + (local[5] - local[2]) * u;
+  const dx = x - Math.max(-h[0], Math.min(h[0], x)), dy = y - Math.max(-h[1], Math.min(h[1], y)), dz = z - Math.max(-h[2], Math.min(h[2], z));
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
 }
 
 const world = new Float64Array(3);

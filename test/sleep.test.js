@@ -372,3 +372,22 @@ test('part of an island freezes while the rest moves, and thaws whole when touch
   spin(3);
   assert.equal(world._frozenCount, 0);
 });
+
+test('a mixed heap sleeps: a capsule lying along what it rests on does not rock for good', () => {
+  // Seed from the 120 heaps that measured the rule (collide.js, capsuleCapsule):
+  // before it, this heap's capsule rocked for as long as anyone watched.
+  let seed = 26 * 1237 + 7;
+  const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const world = new World({ workers: 0 });
+  world.addBody({ type: 'static', size: [180, 1, 180], position: [0, -0.5, 0] });
+  const hull = [0, 0.4, 0, 0.4, -0.2, 0.1, -0.3, -0.2, 0.3, -0.1, -0.2, -0.4, 0.2, 0.1, -0.2];
+  const bodies = [];
+  for (let i = 0; i < 200; i++) {
+    const k = i % 3, position = [(rand() - 0.5) * 8, 0.5 + i * 0.12, (rand() - 0.5) * 8], rotation = [rand() - 0.5, rand() - 0.5, rand() - 0.5, rand() - 0.5];
+    bodies.push(world.addBody(k === 0 ? { size: [0.6, 0.4, 0.8], position, rotation } : k === 1 ? { shape: 'capsule', radius: 0.2, height: 0.9, position, rotation } : { shape: 'hull', vertices: hull, position, rotation }));
+  }
+  for (let s = 0; s < 15 * 60; s++) world.step(1 / 60);
+  // The heap: a capsule that rolled clear may still be rolling.
+  const awake = bodies.filter((b) => Math.hypot(b.position[0], b.position[2]) < 8 && !b.asleep);
+  assert.equal(awake.length, 0, `${awake.length} of the heap awake at 15 s`);
+});

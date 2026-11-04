@@ -13,6 +13,15 @@ All notable changes to Bearing are recorded here. The format follows
   and reused before a step was listed twice for the broadphase, so enough of them ran past the end
   of the list, and a world that shrank kept entries for slots it no longer had. Either way
   `step` threw `Cannot read properties of undefined (reading 'box')`. 3D never had this.
+- **A capsule no longer rocks for good on what it lies along.** A capsule nearly side by side with
+  another, along a box's edge or across a box past both its sides got one contact point, which a
+  tilt of a few milliradians ran the length of the capsule. The solver pushes where a point was as
+  the step began, so the push lagged the rocking and fed it, as much as rolling resistance took
+  out, and the heap around it stayed awake. Such a capsule now rests on both ends of the stretch
+  within the contact tolerance. Of 120 mixed heaps of 200 bodies, 2 were still awake at 40 s, from
+  9, and 3 at 20 s, from 14; a step of them took about 7% less time. 3D results change wherever
+  capsules touch boxes or each other. A capsule rocking on two edges at a very shallow angle can
+  still keep going: that takes contacts found again within the step.
 
 ## [1.3.0] - 2026-11-04
 
