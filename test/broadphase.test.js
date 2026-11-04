@@ -305,3 +305,30 @@ test('bodies of one group never collide, sense or block each other, and collide 
   assert.equal(world.bodyOf(mate).group, 7);
   assert.equal(world.bodyOf(floor).group, 0);
 });
+
+test('adding, removing and stepping at random lists each slot once, within capacity', () => {
+  let seed = 4242;
+  const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const world = new World({ gravity: [0, 0, 0], workers: 0 }), live = [];
+  const listed = () => {
+    const { moved, movedCount } = world._broadphase, seen = new Set();
+    assert.ok(movedCount <= moved.length, `${movedCount} listed in room for ${moved.length}`);
+    for (let i = 0; i < movedCount; i++) {
+      assert.ok(moved[i] < world._slots.capacity && !seen.has(moved[i]), `slot ${moved[i]} listed wrongly`);
+      seen.add(moved[i]);
+    }
+  };
+  for (let k = 0; k < 6000; k++) {
+    const r = rand();
+    if (r < 0.48) live.push(world.addBody({ position: [Math.floor(rand() * 200) * 3, 0, 0] }));
+    else if (r < 0.98 && live.length > 0) {
+      const i = Math.floor(rand() * live.length);
+      live[i].destroy();
+      live[i] = live[live.length - 1];
+      live.pop();
+    } else world.step(1 / 60);
+    listed();
+    if (k % 1500 === 1499) for (const b of live.splice(0)) { b.destroy(); listed(); }
+  }
+  world.step(1 / 60);
+});

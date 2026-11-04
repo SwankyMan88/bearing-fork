@@ -7,6 +7,13 @@ All notable changes to Bearing are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **2D: a crash in `world.step` after adding and removing bodies between steps.** A slot removed
+  and reused before a step was listed twice for the broadphase, so enough of them ran past the end
+  of the list, and a world that shrank kept entries for slots it no longer had. Either way
+  `step` threw `Cannot read properties of undefined (reading 'box')`. 3D never had this.
+
 ## [1.3.0] - 2026-11-04
 
 Bearing in two dimensions, and joints and characters closer to what the games ask of them. There

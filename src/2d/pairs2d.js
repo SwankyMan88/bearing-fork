@@ -187,11 +187,15 @@ export class Broad2D {
   }
 
   resize(capacity) {
+    // A shrink only drops removed slots, but they can still be anywhere on the
+    // moved list, so it is rebuilt rather than cut short.
+    let kept = 0;
+    for (let i = 0; i < this.movedCount; i++) if (this.moved[i] < capacity) this.moved[kept++] = this.moved[i];
+    this.movedCount = kept;
     this.leaf = resized(this.leaf, capacity);
     this.home = resized(this.home, capacity);
     this.marked = resized(this.marked, capacity);
     this.moved = resized(this.moved, capacity);
-    this.movedCount = Math.min(this.movedCount, capacity);
   }
 
   mark(s) {
@@ -209,8 +213,11 @@ export class Broad2D {
 
   remove(s) {
     this.trees[this.home[s]].remove(this.leaf[s]);
+    // Left on the moved list, if it is there: candidates() skips a slot in no
+    // tree, and queries for whatever body takes the slot before the step.
+    // Clearing the mark here would let a reused slot be listed twice, and the
+    // list holds one entry a slot.
     this.leaf[s] = NONE;
-    this.marked[s] = 0;
   }
 
   refile(world, s) {
