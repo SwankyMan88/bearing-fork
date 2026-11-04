@@ -16,7 +16,7 @@ import { World2D } from '../src/2d/bearing2d.js';
 suite('determinism');
 
 const HASH = '8ba8e0f14c1a6cd6586f8476c1112a01c296555bcee6d122b013aff6e67bff5f';
-const HASH_2D = 'e7199037121728216d7b1ac794955b0b66875d192fa5d861d66c02e98d96d532';
+const HASH_2D = '9f78f80605d08cc77f303c3e6074c06cf7f7b3af24d6dd5462a25ca1c5fae441';
 
 test('a world of everything steps to the stored bits', () => {
   const { world } = mixed({ workers: 0 });
@@ -60,6 +60,7 @@ test('a 2D world steps to its stored bits', () => {
     ));
   }
   const lift = world.addBody({ type: 'kinematic', size: [80, 8] });
+  const hero = world.addBody({ type: 'character', shape: 'capsule', radius: 7, height: 44, position: [-300, -100], stepHeight: 16, pushForce: 3000 });
   const hash = createHash('sha256');
   const bytes = (a) => hash.update(new Uint8Array(a.buffer, a.byteOffset, a.byteLength));
   for (let n = 1; n <= 600; n++) {
@@ -68,6 +69,7 @@ test('a 2D world steps to its stored bits', () => {
     if (n % 50 === 0) bodies[n % 40].setAngle(n * 0.123);
     if (n % 90 === 0) world.setTile(map, 10 + n / 90, 36, 0);
     lift.moveTo([n * 0.5, n * 0.25], n * 0.01, 1 / 60);
+    hero.setVelocity(n % 200 < 120 ? 170 : -90, n % 75 === 0 ? -380 : hero.velocity[1]);
     world.step(1 / 60);
     bytes(world.transforms);
     if (n % 60 === 0) for (const column of [world._position, world._rotation, world._angle, world._velocity, world._angular]) bytes(column);

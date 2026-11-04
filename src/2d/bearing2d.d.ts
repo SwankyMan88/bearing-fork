@@ -3,7 +3,7 @@
 /** [x, y]: any array-like of numbers. */
 export type Vec2 = ArrayLike<number>;
 
-export type BodyType2D = 'dynamic' | 'static' | 'kinematic';
+export type BodyType2D = 'dynamic' | 'static' | 'kinematic' | 'character';
 export type ShapeType2D = 'box' | 'circle' | 'capsule' | 'polygon' | 'compound' | 'tilemap' | 'chain';
 
 /** One piece of a compound, placed from the body's origin. */
@@ -73,6 +73,12 @@ export interface BodyOptions2D {
   lockRotation?: boolean;
   /** The axes it never moves along, x and y. Default [false, false]. */
   lockPosition?: readonly [boolean, boolean];
+  /** A character's steepest walkable ground, radians from level. Default π/4. */
+  maxSlope?: number;
+  /** The tallest step a character walks up, px. Default a ninth of its height; null goes back to that. */
+  stepHeight?: number | null;
+  /** The most force a character pushes dynamic bodies with, kg·px/s². Default 0, none. */
+  pushForce?: number;
   /** Its origin, px. Default [0, 0]. */
   position?: Vec2;
   /** Radians. Default 0. */
@@ -115,6 +121,12 @@ export interface BodyInfo2D {
   sensor: boolean;
   lockRotation: boolean;
   lockPosition: [boolean, boolean];
+  /** A character's only. */
+  maxSlope?: number;
+  /** A character's only; null while it follows the size. */
+  stepHeight?: number | null;
+  /** A character's only. */
+  pushForce?: number;
   position: [number, number];
   /** Absent for a tilemap or chain. */
   angle?: number;
@@ -155,6 +167,9 @@ export interface Hit2D {
   normal: [number, number];
   distance: number;
 }
+
+/** What a character stands on: `normal` points out of the ground. */
+export interface Ground2D { body: Body2D; point: [number, number]; normal: [number, number] }
 
 /** Two bodies began touching: where, which way (from a to b), and how fast they met, px/s. */
 export interface BeginEvent2D { type: 'begin'; a: Body2D; b: Body2D; point: [number, number]; normal: [number, number]; speed: number }
@@ -200,6 +215,7 @@ export class World2D {
   overlap(shape: QueryShape2D, position: Vec2, options?: OverlapOptions2D): Body2D[];
   contacts(body?: Body2D): ContactEvent2D[];
   touching(body: Body2D): Body2D[];
+  groundOf(body: Body2D): Ground2D | null;
   /** The slots of bodies that moved since step `since`. */
   moved(since: number): Int32Array;
   step(dt: number): void;

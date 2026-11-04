@@ -75,14 +75,20 @@ const fresh = () => { const world = new World2D(); return { world, body: world.a
 const dead = () => { const f = fresh(); f.world.remove(f.body); return f; };
 const gone = () => { const f = fresh(); f.world.destroy(); return f; };
 
-const OPTIONS = 'type, shape, size, radius, height, vertices, parts, tileSize, columns, rows, tiles, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, sensor, lockRotation, lockPosition, position, angle, velocity, angularVelocity';
+const OPTIONS = 'type, shape, size, radius, height, vertices, parts, tileSize, columns, rows, tiles, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, sensor, lockRotation, lockPosition, maxSlope, stepHeight, pushForce, position, angle, velocity, angularVelocity';
 
 const bodyCases = (call, run) => {
   const e = `world-${call.toLowerCase()}`;
   return [
     [e, run({ tpye: 'static' }), `${call}: unknown option 'tpye' (did you mean 'type'?)`],
     [e, run({ banana: 1 }), `${call}: unknown option 'banana' (the options are ${OPTIONS})`],
-    [e, run({ type: 'character' }), `${call}: type must be 'dynamic', 'static' or 'kinematic', got 'character'`],
+    [e, run({ type: 'robot' }), `${call}: type must be 'dynamic', 'static', 'kinematic' or 'character', got 'robot'`],
+    [e, run({ type: 'character', shape: 'polygon' }), `${call}: type must be 'dynamic', 'static' or 'kinematic' for a polygon, got 'character'`],
+    [e, run({ type: 'character', centerOfMass: [1, 0] }), `${call}: a character body has no centerOfMass`],
+    [e, run({ maxSlope: 1 }), `${call}: a dynamic body has no maxSlope`],
+    [e, run({ type: 'character', maxSlope: 2 }), `${call}: maxSlope must be an angle from 0 to π/2, in radians, got 2`],
+    [e, run({ type: 'character', stepHeight: -1 }), `${call}: stepHeight must be 0 or more, or null to follow the size, got -1`],
+    [e, run({ type: 'character', pushForce: -1 }), `${call}: pushForce must be 0 or more, got -1`],
     [e, run({ shape: 'sphere' }), `${call}: shape must be 'box', 'circle', 'capsule', 'polygon', 'compound', 'tilemap' or 'chain', got 'sphere'`],
     [e, run({ shape: 'chain', vertices: [0, 0] }), `${call}: vertices must be 2 or more points, finite numbers, two to a point, got 0,0`],
     [e, run({ shape: 'chain', vertices: [0, 0, 0, 0] }), `${call}: vertices must not repeat a point, got 0,0,0,0`],
@@ -233,6 +239,10 @@ const CASES = [
   ['world-touching', () => fresh().world.touching(3), 'touching: body must be a Body2D, got 3'],
   ['world-touching', () => fresh().world.touching(fresh().body), 'touching: body belongs to another world'],
   ['world-touching', () => { const { world, body } = dead(); world.touching(body); }, 'touching: body was removed'],
+  ['world-groundof', () => gone().world.groundOf(gone().body), 'groundOf: this world was destroyed'],
+  ['world-groundof', () => fresh().world.groundOf(3), 'groundOf: body must be a Body2D, got 3'],
+  ['world-groundof', () => fresh().world.groundOf(fresh().body), 'groundOf: body belongs to another world'],
+  ['world-groundof', () => { const { world, body } = dead(); world.groundOf(body); }, 'groundOf: body was removed'],
   ['world-setbody', () => gone().world.setBody(gone().body, {}), 'setBody: this world was destroyed'],
   ['world-setbody', () => fresh().world.setBody(3, {}), 'setBody: body must be a Body2D, got 3'],
   ['world-setbody', () => fresh().world.setBody(fresh().body, {}), 'setBody: body belongs to another world'],

@@ -175,6 +175,15 @@ test('a chain is one-sided, holds what lands on its front, and its joints catch 
   assert.ok(roller.position[1] < 120, 'through the chain');
 });
 
+test('a cast beside a wall one tile thick is not stopped by the far side of the wall', () => {
+  // The cast's reach takes in the wall's far line, whose closed side it stands on.
+  const world = new World2D();
+  const tiles = new Uint32Array(40 * 40);
+  for (let r = 0; r < 40; r++) tiles[r * 40 + 20] = 1;
+  world.addBody({ shape: 'tilemap', tileSize: [16, 16], columns: 40, rows: 40, tiles });
+  assert.equal(world.shapeCast({ shape: 'capsule', radius: 7, height: 44 }, [313, 320], [0, -1], { maxDistance: 60 }), null);
+});
+
 test('a thousand shards rained on a map land and stay on it, and sleep', () => {
   const world = new World2D();
   level(world, 300);

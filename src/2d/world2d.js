@@ -36,6 +36,7 @@ import { Chain, Tilemap } from './level2d.js';
 import { Contacts2D, PIXEL, makeSoft, meet, meetMany, prepare, restitution, soft, solve, store, touched, warmStart } from './contact2d.js';
 import { Events, END, IMPACT } from '../events.js';
 import { overlap as overlapping, ray, sweep } from './query2d.js';
+import { CHARACTER, settle, walk } from './character2d.js';
 import { Broad2D, Pairs2D, pairable } from './pairs2d.js';
 
 const WORLD_OPTIONS = ['gravity', 'substeps', 'sleeping'];
@@ -43,7 +44,7 @@ const BODY_OPTIONS = [
   'type', 'shape', 'size', 'radius', 'height', 'vertices', 'parts', 'tileSize', 'columns', 'rows', 'tiles',
   'density', 'mass', 'inertia', 'centerOfMass',
   'friction', 'restitution', 'damping', 'angularDamping', 'gravityScale', 'layers', 'mask', 'group', 'sensor',
-  'lockRotation', 'lockPosition',
+  'lockRotation', 'lockPosition', 'maxSlope', 'stepHeight', 'pushForce',
   'position', 'angle', 'velocity', 'angularVelocity',
 ];
 const RAY_OPTIONS = ['maxDistance', 'mask', 'ignore'];
@@ -52,7 +53,7 @@ const OVERLAP_OPTIONS = ['mask', 'ignore', 'angle'];
 const QUERY_SHAPE = ['shape', 'size', 'radius', 'height'];
 const QUERY_SHAPES = ['box', 'circle', 'capsule'];
 const PART_OPTIONS = ['shape', 'size', 'radius', 'height', 'vertices', 'position', 'angle', 'density'];
-const TYPES = ['dynamic', 'static', 'kinematic'];
+const TYPES = ['dynamic', 'static', 'kinematic', 'character'];
 const SHAPES = ['box', 'circle', 'capsule', 'polygon', 'compound', 'tilemap', 'chain'];
 const PART_SHAPES = ['box', 'circle', 'capsule', 'polygon'];
 const DYNAMIC = 0, STATIC = 1, CIRCLE = 1;
@@ -65,6 +66,8 @@ const SIZES = {
 const ALL_SIZES = ['size', 'radius', 'height', 'vertices', 'parts', 'tileSize', 'columns', 'rows', 'tiles'];
 /** Shapes with no mass, enclosing nothing or too much to move: static. */
 const LEVELS = ['tilemap', 'chain'];
+/** A character's own options. */
+const WALKING = ['maxSlope', 'stepHeight', 'pushForce'];
 /** What a level has no use for. */
 const NOT_LEVEL = ['density', 'mass', 'inertia', 'centerOfMass', 'angle', 'angularVelocity', 'velocity'];
 
@@ -92,6 +95,8 @@ const DEFAULTS = Object.freeze({
   // Everything collides with everything until told otherwise, as in 3D.
   layers: 1, mask: 0xffffffff, group: 0, sensor: false,
   lockRotation: false, lockPosition: [false, false],
+  // 45°, the steepest friction 1 holds, and pushing nothing, as in 3D.
+  maxSlope: Math.PI / 4, stepHeight: 0, stepGiven: false, pushForce: 0,
   position: [0, 0], angle: 0, velocity: [0, 0], angularVelocity: 0,
 });
 
@@ -129,6 +134,14 @@ const COLUMNS = [
   ['_mask', Uint32Array, 1],         // which it collides with
   ['_group', Float64Array, 1],       // bodies of one group, but 0, never collide
   ['_sensor', Uint8Array, 1],
+  ['_maxSlope', Float64Array, 1],
+  ['_slopeCos', Float64Array, 1],    // cos(maxSlope)
+  ['_stepHeight', Float64Array, 1],
+  ['_stepGiven', Uint8Array, 1],
+  ['_pushForce', Float64Array, 1],
+  ['_ground', Float64Array, 1],      // the id of what a character stands on, or -1
+  ['_groundAt', Float64Array, 4],    // where, and its normal
+  ['_walk', Float64Array, 2],        // a character's velocity of its own accord
   ['_lockRotation', Uint8Array, 1],
   ['_lockMove', Uint8Array, 1],      // bit 0: never moves along x; bit 1: along y
   ['_inAwake', Int32Array, 1],       // 1 + its place in _awakeList, or 0
@@ -171,6 +184,8 @@ export class World2D {
     this._torque = null; this._forced = null; this._friction = null; this._restitution = null;
     this._damping = null; this._angularDamping = null; this._gravityScale = null;
     this._lockRotation = null; this._lockMove = null; this._inAwake = null; this._awakeList = null;
+    this._maxSlope = null; this._slopeCos = null; this._stepHeight = null; this._stepGiven = null; this._pushForce = null;
+    this._ground = null; this._groundAt = null; this._walk = null;
     this._layers = null; this._mask = null; this._group = null; this._island = null; this._islandNext = null;
     this._still = null; this._calm = null; this._rest = null; this._parent = null; this._blocked = null; this._movedAt = null;
     this._size = null; this._reach = null; this._motion = null;
@@ -207,6 +222,7 @@ export class World2D {
     this._forcedSlots = [];
     this._awakeCount = 0;
     this._lockMoveCount = 0;
+    this._characterCount = 0;
     this._stepCount = 0;
     this._destroyed = false;
   }
@@ -328,6 +344,11 @@ export class World2D {
     out.damping = spec.damping; out.angularDamping = spec.angularDamping; out.gravityScale = spec.gravityScale;
     out.layers = spec.layers; out.mask = spec.mask; out.group = spec.group; out.sensor = spec.sensor;
     out.lockRotation = spec.lockRotation;
+    if (spec.type === 'character') {
+      out.maxSlope = spec.maxSlope;
+      out.stepHeight = spec.stepGiven ? spec.stepHeight : null;
+      out.pushForce = spec.pushForce;
+    }
     out.lockPosition = [...spec.lockPosition];
     out.position = [...spec.position];
     if (!level) out.angle = spec.angle;
@@ -469,6 +490,14 @@ export class World2D {
     return out;
   }
 
+  /** What a character stands on, as of the last step: { body, point, normal }, or null in the air, or for any other body. */
+  groundOf(body) {
+    const s = this._slotOfBody('groundOf', body);
+    if (this._type[s] !== CHARACTER || this._ground[s] < 0) return null;
+    const a = this._groundAt, s4 = 4 * s;
+    return { body: new Body2D(this, this._ground[s]), point: [a[s4], a[s4 + 1]], normal: [a[s4 + 2], a[s4 + 3]] };
+  }
+
   /** Every body touching this one, as of the last step: its own pairs, so it costs what it touches. */
   touching(body) {
     const s = this._slotOfBody('touching', body), pairs = this._pairs, out = [];
@@ -545,6 +574,7 @@ export class World2D {
     for (let k = 0; k < due.length; k += 2) this._events.end(due[k], due[k + 1]);
     due.length = 0;
     if (this._forcedSlots.length > 0) this._applyForces(dt);
+    if (this._characterCount > 0) walk(this, dt);
     const list = this._awakeList, tr = this._transforms, prev = this._previous, r = this._rotation, turn = this._startTurn;
     for (let i = 0; i < this._awakeCount; i++) {
       const s = list[i], t3 = 3 * s, s2 = 2 * s;
@@ -576,6 +606,7 @@ export class World2D {
       store(c, this._pairs);
       touched(this, this._pairs, c, gravity);
     }
+    if (this._characterCount > 0) settle(this);
     if (this._sensed.length > 0) this._senseAll();
     this._events.trim();
     const angle = this._angle;
@@ -795,6 +826,7 @@ export class World2D {
     this._cores[s] = null;
     this._level[s] = null;
     if (this._lockMove[s] !== 0) { this._lockMove[s] = 0; this._lockMoveCount--; }
+    if (this._type[s] === CHARACTER) { this._type[s] = DYNAMIC; this._characterCount--; }
     this._unawaken(s);
     this._slots.release(s);
     // Shrunk by the 1/4 rule, as in 3D (world.js _remove).
@@ -969,6 +1001,7 @@ export class World2D {
       friction: this._friction[s], restitution: this._restitution[s], damping: this._damping[s],
       angularDamping: this._angularDamping[s], gravityScale: this._gravityScale[s],
       layers: this._layers[s], mask: this._mask[s], group: this._group[s], sensor: this._sensor[s] === 1,
+      maxSlope: this._maxSlope[s], stepHeight: this._stepHeight[s], stepGiven: this._stepGiven[s] === 1, pushForce: this._pushForce[s],
       lockRotation: this._lockRotation[s] === 1,
       lockPosition: [(this._lockMove[s] & 1) !== 0, (this._lockMove[s] & 2) !== 0],
       position: [POSE[0], POSE[1]], angle: POSE[2],
@@ -979,7 +1012,10 @@ export class World2D {
   /** Writes a checked description into slot s's columns. */
   _write(s, spec) {
     const s2 = 2 * s, s3 = 3 * s, d = this._dims;
-    this._type[s] = TYPES.indexOf(spec.type);
+    const kind = TYPES.indexOf(spec.type);
+    this._characterCount += (kind === CHARACTER ? 1 : 0) - (this._type[s] === CHARACTER ? 1 : 0);
+    if (kind === CHARACTER && this._type[s] !== CHARACTER) this._ground[s] = -1;
+    this._type[s] = kind;
     this._shape[s] = SHAPES.indexOf(spec.shape);
     this._geometry[s] = spec.shape === 'polygon' || spec.shape === 'chain' ? spec.vertices : spec.shape === 'compound' ? spec.parts : null;
     d[s3] = spec.shape === 'box' ? spec.size[0] : spec.radius;
@@ -1022,6 +1058,12 @@ export class World2D {
     this._gravityScale[s] = spec.gravityScale;
     this._layers[s] = spec.layers; this._mask[s] = spec.mask; this._group[s] = spec.group;
     this._sensor[s] = spec.sensor ? 1 : 0;
+    this._maxSlope[s] = spec.maxSlope; this._slopeCos[s] = cos(spec.maxSlope);
+    this._pushForce[s] = spec.pushForce;
+    this._stepGiven[s] = spec.stepGiven ? 1 : 0;
+    // Unless given, a ninth of its height, as in 3D: building codes cap a stair
+    // near a ninth of a person.
+    this._stepHeight[s] = spec.stepGiven ? spec.stepHeight : (spec.shape === 'box' ? spec.size[1] : spec.shape === 'circle' ? 2 * spec.radius : spec.height) / 9;
     this._lockRotation[s] = spec.lockRotation ? 1 : 0;
     const held = (spec.lockPosition[0] ? 1 : 0) | (spec.lockPosition[1] ? 2 : 0);
     this._lockMoveCount += (held !== 0 ? 1 : 0) - (this._lockMove[s] !== 0 ? 1 : 0);
@@ -1189,14 +1231,15 @@ export class World2D {
    */
   _sleep(dt) {
     const list = this._awakeList, p = this._position, r = this._rotation, rest = this._rest, reach = this._reach;
-    const size = this._size, still = this._still, calm = this._calm, shape = this._shape, parent = this._parent;
+    const size = this._size, still = this._still, calm = this._calm, shape = this._shape, parent = this._parent, type = this._type;
     let ready = false;
     for (let i = 0; i < this._awakeCount; i++) {
       const s = list[i], s2 = 2 * s, s4 = 4 * s, tolerance = size[s] * PIXEL;
       const dx = p[s2] - rest[s4], dy = p[s2 + 1] - rest[s4 + 1], dc = r[s2] - rest[s4 + 2], dz = r[s2 + 1] - rest[s4 + 3];
       let far = dx * dx + dy * dy;
       if (shape[s] !== CIRCLE) far += (dc * dc + dz * dz) * reach[s] * reach[s];
-      const again = far > tolerance * tolerance;
+      // A character never sleeps, so what it stands on can always carry it.
+      const again = far > tolerance * tolerance || type[s] === CHARACTER;
       still[s] = again ? 0 : still[s] + dt;
       if (again) calm[s] = 0;
       else if (still[s] >= SLEEP_TIME) { calm[s] = 1; still[s] = 0; }
@@ -1211,7 +1254,7 @@ export class World2D {
       while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; }
       return x;
     };
-    const c = this._contacts, type = this._type;
+    const c = this._contacts;
     for (let m = 0; m < c.count; m++) {
       const a = c.a[m], b = c.b[m];
       if (type[a] === DYNAMIC && type[b] === DYNAMIC) parent[find(a)] = find(b);
@@ -1498,6 +1541,22 @@ function resolve(caller, base, given) {
     }
     lockPosition = [l[0], l[1]];
   }
+  if (type !== 'character') for (const k of WALKING) if (has(k)) fail(caller, `a ${type} body has no ${k}`);
+  if (type === 'character' && (shape === 'polygon' || shape === 'compound')) fail(caller, `type must be 'dynamic', 'static' or 'kinematic' for a ${shape}, got 'character'`);
+  if (type === 'character' && has('centerOfMass') && given.centerOfMass !== null) fail(caller, 'a character body has no centerOfMass');
+  let { maxSlope, stepHeight, stepGiven } = base;
+  if (has('maxSlope')) {
+    const a = given.maxSlope;
+    if (typeof a !== 'number' || !(a >= 0 && a <= Math.PI / 2)) fail(caller, `maxSlope must be an angle from 0 to π/2, in radians, got ${show(a)}`);
+    maxSlope = a;
+  }
+  if (given.stepHeight === null) stepGiven = false;
+  else if (has('stepHeight')) {
+    const h = given.stepHeight;
+    if (typeof h !== 'number' || !(h >= 0) || h === Infinity) fail(caller, `stepHeight must be 0 or more, or null to follow the size, got ${show(h)}`);
+    stepHeight = h; stepGiven = true;
+  }
+  const pushForce = has('pushForce') ? atLeastZero(caller, 'pushForce', given.pushForce) : base.pushForce;
   const position = has('position') ? vec2(caller, 'position', given.position) : base.position;
   const angle = has('angle') ? finite(caller, 'angle', given.angle) : base.angle;
   if (type === 'static') {
@@ -1509,6 +1568,7 @@ function resolve(caller, base, given) {
   return {
     type, shape, size, radius, height, vertices, parts, tileSize, columns, rows, tiles, density, mass, massGiven, inertia, inertiaGiven, centerOfMass,
     friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, sensor, lockRotation, lockPosition,
+    maxSlope, stepHeight, stepGiven, pushForce,
     position, angle, velocity, angularVelocity,
   };
 }

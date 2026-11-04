@@ -496,7 +496,11 @@ These were made with Nolan and override the rules below where they differ.
   clockwise on screen. Nothing else is tied to a unit, since tolerances follow body size, so metres
   with y up are a matter of setting gravity and density (measured at 100 units to the metre, y
   flipped: same to the printed digit). `tilemap` is a shape: Winding's `tileSize`, `columns`, `rows`,
-  `tiles`, and `world.setTile` as Winding's `scene.setTile`. This settles rules 50 and 51.
+  `tiles`, and `world.setTile` as Winding's `scene.setTile`. This settles rules 50 and 51. Character
+  bodies (`src/2d/character2d.js`) are 3D's method on `sweep()` and `deepest()`, same options, box,
+  circle or capsule; a climb rises `2 * tolerance` over `stepHeight` so a box rises off an exact
+  step's tread, and lands held to it. `fromFront` takes only what is within the tolerance of the
+  line: a margin reaches the back of a one-tile wall.
 - **`package.json` was `"private": true` until the first release** (0.14.0, 2026-11-02), so a
   stray `npm publish` from the repo was refused; `release.yml` still stops on it if it returns. The name claim in rule 9 is a separate placeholder package that Nolan
   publishes himself (it needs his 2FA), and it is also what npm needs to exist before trusted

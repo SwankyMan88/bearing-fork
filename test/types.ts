@@ -272,6 +272,10 @@ export function joints(): void {
   const near2d: Body2D[] = flat.overlap({ shape: 'circle', radius: 2 }, [0, 0], { ignore: ground });
   for (const e of flat.contacts(ground)) if (e.type !== 'end') void (e.speed + e.point[0] + far2d);
   flat.touching(near2d[0]);
+  const walker = flat.addBody({ type: 'character', shape: 'capsule', radius: 7, height: 44, maxSlope: 0.7, stepHeight: 16, pushForce: 100 });
+  flat.setBody(walker, { stepHeight: null });
+  const under: [number, number] | undefined = flat.groundOf(walker)?.normal;
+  void under;
   flat.addBody({ sensor: true });
   const read: BodyInfo2D = flat.bodyOf(shard);
   const at: Vec2 = read.position;

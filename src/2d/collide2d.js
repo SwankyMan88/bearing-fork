@@ -251,7 +251,12 @@ export function collideSide(coreA, ax, ay, ac, as, x1, y1, x2, y2, margin, toler
  * line that let go then would let it fall for good: it goes on being pushed
  * back out the way it came.
  */
-export function fromFront(margin, depth, m) {
+export function fromFront(margin, depth, tolerance, m) {
+  // Only what is at the line. A margin reaches further, by a fast body's step or
+  // a cast's length, and the back of a one-tile wall isn't pressed through by
+  // what stands in front of it.
+  const near = m.count === 2 && m.separation[1] < m.separation[0] ? m.separation[1] : m.separation[0];
+  if (near > tolerance) return (m.count = 0);
   const count = clip(B, A, 0, B.nx[0], B.ny[0], true, margin, m);
   // Further behind than its own width isn't pressed past the line: it is
   // somewhere else, as all the map is behind the map's bottom edge.

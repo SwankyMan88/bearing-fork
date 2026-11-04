@@ -172,17 +172,27 @@ export function ray(world, ox, oy, dx, dy, maxT, mask, ignore, hit, nearest) {
 
 // A cast's state, for its emit: a query isn't re-entered.
 const found = new Manifold2();
-let overlapping = false;
+let overlapping = false, deepening = false, deepS = 0, deepX = 0, deepY = 0, cLeft = 0;
+const ROUNDING = 1 / 262144;   // 2^-18
 let cDx = 0, cDy = 0, cTolerance = 0, cTime = Infinity, cHit = false, cNx = 0, cNy = 0, cPx = 0, cPy = 0;
 
 /** One manifold's say on the cast: touching and going in, a hit; else how soon it could be. */
 function weigh(m) {
+  if (deepening) {
+    for (let k = 0; k < m.count; k++) if (m.separation[k] < deepS) { deepS = m.separation[k]; deepX = m.nx; deepY = m.ny; }
+    return;
+  }
   const speed = cDx * m.nx + cDy * m.ny;
   for (let k = 0; k < m.count; k++) {
     const s = m.separation[k];
     if (s <= cTolerance) {
-      // Touching and going in, or just asked whether it overlaps.
-      if (speed > 0 || overlapping || s < -cTolerance) { if (!cHit || s < 0) { cHit = true; cNx = m.nx; cNy = m.ny; cPx = m.x[k]; cPy = m.y[k]; } }
+      // Touching and going in, or just asked whether it overlaps. At the start
+      // of a cast, as in 3D: stopped only if the whole move could take it further
+      // in than it is, or than touching, by more than rounding, 2^-26 of its
+      // size (tolerance is 2^-8 of it), so a move along a surface or round a
+      // tile's corner, tilted into it by rounding, isn't stopped.
+      const going = speed > 0 && (cLeft === 0 || speed * cLeft > (s > 0 ? s : 0) + cTolerance * ROUNDING);
+      if (going || overlapping || s < -cTolerance) { if (!cHit || s < 0) { cHit = true; cNx = m.nx; cNy = m.ny; cPx = m.x[k]; cPy = m.y[k]; } }
     } else if (speed > 0) {
       const t = (s - cTolerance * 0.5) / speed;
       if (t < cTime) cTime = t;
@@ -209,7 +219,7 @@ function castBody(world, s, core, x, y, c, z, dx, dy, maxT, tolerance) {
   cDx = dx; cDy = dy; cTolerance = tolerance;
   let t = 0;
   for (let round = 0; round < ROUNDS; round++) {
-    cTime = Infinity; cHit = false;
+    cTime = Infinity; cHit = false; cLeft = round === 0 ? maxT : 0;
     weighAll(world, s, core, x + dx * t, y + dy * t, c, z, maxT - t + tolerance);
     if (cHit) return t;
     if (cTime === Infinity) return -1;
@@ -237,6 +247,28 @@ export function sweep(world, core, x, y, c, z, dx, dy, maxT, tolerance, accept, 
     }
   };
   for (const tree of world._broad.trees) tree.query(x0, y0, 0, x1, y1, 0, visit);
+  return best;
+}
+
+/**
+ * The deepest `core`, placed at (x, y), is into anything accept(slot) passes:
+ * its slot, into[0] how deep, into[1..2] the way out; -1 if clear to within
+ * `tolerance`. What a character is pushed out of.
+ */
+export function deepest(world, core, x, y, c, z, tolerance, accept, into) {
+  const r = core.reach + Math.abs(core.ox) + Math.abs(core.oy) + tolerance;
+  let best = -1, most = tolerance;
+  cDx = 0; cDy = 0; cTolerance = tolerance;
+  overlapping = false;
+  const visit = (s) => {
+    if (!accept(s)) return;
+    deepS = Infinity;
+    weighAll(world, s, core, x, y, c, z, 0);
+    if (-deepS > most) { most = -deepS; best = s; into[0] = most; into[1] = -deepX; into[2] = -deepY; }
+  };
+  deepening = true;
+  for (const tree of world._broad.trees) tree.query(x - r, y - r, 0, x + r, y + r, 0, visit);
+  deepening = false;
   return best;
 }
 

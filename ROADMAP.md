@@ -762,7 +762,8 @@ theirs; `ShapeType` for the type `Shape`.
   4. **`tilemap`, `chain`, `compound` contacts:** 5,000 shards on a tilemap mined live, no catching on
      seams.
   5. **Queries, events, sensors:** the 3D checks.
-  6. **Character bodies:** walks, climbs and jumps on tiles. 1.3.0 follows, on Nolan's word.
+  6. **Character bodies ✅:** walks, climbs and jumps on tiles (2026-11-04). 1.3.0 follows, on
+     Nolan's word.
   7. After that: joints, continuous collision, save and load, debug lines, workers, the comparison.
 - Not in Bearing: a vehicle controller and a ragdoll builder. Arcade handling and a humanoid from
   a config file are game feel, built from raycasts, forces, joints and pose motors Bearing already
