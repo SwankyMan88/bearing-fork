@@ -40,6 +40,9 @@ export class Pairs2D {
     this.a = null; this.b = null; this.touching = null;
     // What it pushed with last, by point name: -1 for no point.
     this.ids = null; this.normal = null; this.tangent = null; this.roll = null;
+    // A pair of many rows (a level, a compound) keeps key, normal, tangent to a point.
+    this.extra = [];
+    this.extraCount = null;
     this.next = null; this.previous = null;   // each edge's along its body's list
     this.head = new Int32Array(0);            // by slot: 1 + its first edge, or 0
     this.tally = new Int32Array(0);           // by slot: how many pairs it is in
@@ -50,7 +53,7 @@ export class Pairs2D {
     const grow = (name, Type, n) => { this[name] = this[name] ? resized(this[name], n) : new Type(n); };
     grow('a', Int32Array, c); grow('b', Int32Array, c); grow('touching', Uint8Array, c);
     grow('ids', Int32Array, 2 * c); grow('normal', Float64Array, 2 * c); grow('tangent', Float64Array, 2 * c);
-    grow('roll', Float64Array, c); grow('next', Int32Array, 2 * c); grow('previous', Int32Array, 2 * c);
+    grow('roll', Float64Array, c); grow('extraCount', Int32Array, c); grow('next', Int32Array, 2 * c); grow('previous', Int32Array, 2 * c);
     this.capacity = c;
   }
 
@@ -92,7 +95,7 @@ export class Pairs2D {
     let p = this.count++;
     if (this.active < p) { this._move(this.active, p); p = this.active; }
     this.active++;
-    this.a[p] = a; this.b[p] = b; this.touching[p] = 0; this.roll[p] = 0;
+    this.a[p] = a; this.b[p] = b; this.touching[p] = 0; this.roll[p] = 0; this.extraCount[p] = 0;
     const p2 = 2 * p;
     this.ids[p2] = NONE; this.ids[p2 + 1] = NONE;
     this.normal[p2] = 0; this.normal[p2 + 1] = 0; this.tangent[p2] = 0; this.tangent[p2 + 1] = 0;
@@ -100,9 +103,25 @@ export class Pairs2D {
     return p;
   }
 
+  /** One kept push of a many-row pair; its list grows by doubling, and is reused. */
+  keep(p, key, normal, tangent) {
+    let list = this.extra[p], n = this.extraCount[p];
+    if (list === undefined || list === null || n + 3 > list.length) {
+      const longer = new Float64Array(list ? 2 * list.length : 12);
+      if (list) longer.set(list);
+      list = this.extra[p] = longer;
+    }
+    list[n] = key; list[n + 1] = normal; list[n + 2] = tangent;
+    this.extraCount[p] = n + 3;
+  }
+
   /** Copies row `from` over row `to`, carrying its links; `to` must be unlinked or dead. */
   _move(from, to) {
     this.a[to] = this.a[from]; this.b[to] = this.b[from]; this.touching[to] = this.touching[from]; this.roll[to] = this.roll[from];
+    this.extraCount[to] = this.extraCount[from];
+    const held = this.extra[to];
+    this.extra[to] = this.extra[from];
+    this.extra[from] = held;
     const f = 2 * from, t = 2 * to;
     for (let k = 0; k < 2; k++) {
       this.ids[t + k] = this.ids[f + k]; this.normal[t + k] = this.normal[f + k]; this.tangent[t + k] = this.tangent[f + k];

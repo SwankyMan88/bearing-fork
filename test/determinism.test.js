@@ -16,7 +16,7 @@ import { World2D } from '../src/2d/bearing2d.js';
 suite('determinism');
 
 const HASH = '8ba8e0f14c1a6cd6586f8476c1112a01c296555bcee6d122b013aff6e67bff5f';
-const HASH_2D = '131cdaae4762b26aca4ae67f1fb83a1968d968f5d7aa4d72cba158ce9443eefe';
+const HASH_2D = '4ad091c20764ec4bb786d0028bf6669821bc57f9369b073b9edab9bc00786dd2';
 
 test('a world of everything steps to the stored bits', () => {
   const { world } = mixed({ workers: 0 });
@@ -41,9 +41,11 @@ test('a 2D world steps to its stored bits', () => {
   // Every shape, spun, pushed, damped, locked and driven, placed through the
   // calls that take an angle, so Bearing's own sine and cosine are in the hash.
   const world = new World2D();
-  world.addBody({ type: 'static', size: [4000, 100], position: [0, 300] });
-  world.addBody({ type: 'static', size: [100, 4000], position: [-500, 0] });
-  world.addBody({ type: 'static', size: [100, 4000], position: [500, 0] });
+  const tiles = new Uint32Array(70 * 40);
+  for (let r = 0; r < 40; r++) { tiles[r * 70] = 1; tiles[r * 70 + 69] = 1; if (r % 3 === 0) tiles[r * 70 + 2 * r] = 1; }
+  tiles.fill(1, 70 * 36);
+  const map = world.addBody({ shape: 'tilemap', tileSize: [16, 16], columns: 70, rows: 40, tiles, position: [-560, -300] });
+  world.addBody({ shape: 'chain', vertices: [-500, 280, -200, 240, 0, 270, 300, 230, 500, 280] });
   const bodies = [];
   for (let k = 0; k < 40; k++) {
     const common = { position: [k * 37.5 - 400, -k * 11.25], angle: k * 0.7, restitution: k % 4 === 0 ? 0.6 : 0, velocity: [k - 20, -3 * k], angularVelocity: 0.3 * k - 6, damping: k % 3 === 0 ? 0.2 : 0, angularDamping: k % 5 === 0 ? 0.1 : 0, lockPosition: [k % 7 === 0, false] };
@@ -63,6 +65,7 @@ test('a 2D world steps to its stored bits', () => {
     bodies[n % 40].applyForce([300, -200], [n, n]);
     if (n % 7 === 0) bodies[n % 40].applyTorque(900);
     if (n % 50 === 0) bodies[n % 40].setAngle(n * 0.123);
+    if (n % 90 === 0) world.setTile(map, 10 + n / 90, 36, 0);
     lift.moveTo([n * 0.5, n * 0.25], n * 0.01, 1 / 60);
     world.step(1 / 60);
     bytes(world.transforms);

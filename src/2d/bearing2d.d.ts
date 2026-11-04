@@ -4,7 +4,7 @@
 export type Vec2 = ArrayLike<number>;
 
 export type BodyType2D = 'dynamic' | 'static' | 'kinematic';
-export type ShapeType2D = 'box' | 'circle' | 'capsule' | 'polygon' | 'compound';
+export type ShapeType2D = 'box' | 'circle' | 'capsule' | 'polygon' | 'compound' | 'tilemap' | 'chain';
 
 /** One piece of a compound, placed from the body's origin. */
 export interface Part2D {
@@ -35,6 +35,14 @@ export interface BodyOptions2D {
   vertices?: ArrayLike<number>;
   /** A compound's parts. */
   parts?: readonly Part2D[];
+  /** A tilemap's tile, px. Default [16, 16]. */
+  tileSize?: Vec2;
+  /** A tilemap's width in tiles. Default 1. */
+  columns?: number;
+  /** A tilemap's height in tiles. Default 1. */
+  rows?: number;
+  /** columns x rows ids, row by row from the top-left: 0 is empty. */
+  tiles?: ArrayLike<number>;
   /** kg/px². Default 0.1. */
   density?: number;
   /** kg, instead of density. */
@@ -82,10 +90,16 @@ export interface BodyInfo2D {
   height?: number;
   vertices?: number[];
   parts?: Part2D[];
+  tileSize?: [number, number];
+  columns?: number;
+  rows?: number;
+  tiles?: Uint32Array;
   density?: number;
   mass?: number;
-  inertia: number | null;
-  centerOfMass: [number, number] | null;
+  /** Absent for a tilemap or chain. */
+  inertia?: number | null;
+  /** Absent for a tilemap or chain. */
+  centerOfMass?: [number, number] | null;
   friction: number;
   restitution: number;
   damping: number;
@@ -99,7 +113,8 @@ export interface BodyInfo2D {
   lockRotation: boolean;
   lockPosition: [boolean, boolean];
   position: [number, number];
-  angle: number;
+  /** Absent for a tilemap or chain. */
+  angle?: number;
   /** Absent for a static body. */
   velocity?: [number, number];
   /** Absent for a static body. */
@@ -132,6 +147,9 @@ export class World2D {
   setBody(body: Body2D, changes: BodyOptions2D): void;
   bodyOf(body: Body2D): BodyInfo2D;
   remove(handle: Body2D): void;
+  /** Tile (x, y) of a tilemap, 0 for empty. */
+  setTile(body: Body2D, x: number, y: number, id: number): void;
+  tileAt(body: Body2D, x: number, y: number): number;
   body(id: number): Body2D;
   /** The slots of bodies that moved since step `since`. */
   moved(since: number): Int32Array;

@@ -75,7 +75,7 @@ const fresh = () => { const world = new World2D(); return { world, body: world.a
 const dead = () => { const f = fresh(); f.world.remove(f.body); return f; };
 const gone = () => { const f = fresh(); f.world.destroy(); return f; };
 
-const OPTIONS = 'type, shape, size, radius, height, vertices, parts, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, lockRotation, lockPosition, position, angle, velocity, angularVelocity';
+const OPTIONS = 'type, shape, size, radius, height, vertices, parts, tileSize, columns, rows, tiles, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, lockRotation, lockPosition, position, angle, velocity, angularVelocity';
 
 const bodyCases = (call, run) => {
   const e = `world-${call.toLowerCase()}`;
@@ -83,7 +83,16 @@ const bodyCases = (call, run) => {
     [e, run({ tpye: 'static' }), `${call}: unknown option 'tpye' (did you mean 'type'?)`],
     [e, run({ banana: 1 }), `${call}: unknown option 'banana' (the options are ${OPTIONS})`],
     [e, run({ type: 'character' }), `${call}: type must be 'dynamic', 'static' or 'kinematic', got 'character'`],
-    [e, run({ shape: 'sphere' }), `${call}: shape must be 'box', 'circle', 'capsule', 'polygon' or 'compound', got 'sphere'`],
+    [e, run({ shape: 'sphere' }), `${call}: shape must be 'box', 'circle', 'capsule', 'polygon', 'compound', 'tilemap' or 'chain', got 'sphere'`],
+    [e, run({ shape: 'chain', vertices: [0, 0] }), `${call}: vertices must be 2 or more points, finite numbers, two to a point, got 0,0`],
+    [e, run({ shape: 'chain', vertices: [0, 0, 0, 0] }), `${call}: vertices must not repeat a point, got 0,0,0,0`],
+    [e, run({ shape: 'tilemap', tileSize: [0, 16] }), `${call}: tileSize must be 2 positive numbers, got 0,16`],
+    [e, run({ shape: 'tilemap', columns: 0 }), `${call}: columns must be a whole number, 1 or more, got 0`],
+    [e, run({ shape: 'tilemap', rows: 1.5 }), `${call}: rows must be a whole number, 1 or more, got 1.5`],
+    [e, run({ shape: 'tilemap', tiles: [-1] }), `${call}: tiles must be whole numbers that fit in 32 bits, got -1`],
+    [e, run({ shape: 'tilemap', columns: 2, rows: 2, tiles: [0, 1, 0] }), `${call}: tiles holds 3 ids; a 2 x 2 map needs 4`],
+    [e, run({ shape: 'tilemap', type: 'dynamic' }), `${call}: type must be 'static' for a tilemap, got 'dynamic'`],
+    [e, run({ shape: 'chain', mass: 1 }), `${call}: a chain has no mass`],
     [e, run({ radius: 1 }), `${call}: a box has no radius`],
     [e, run({ size: [1, 0] }), `${call}: size must be 2 positive numbers, got 1,0`],
     [e, run({ shape: 'circle', radius: -1 }), `${call}: radius must be a positive number, got -1`],
@@ -154,6 +163,18 @@ const CASES = [
   ['world-addbody', addParts([{ position: 1 }]), 'addBody: parts[0].position must be 2 finite numbers, got 1'],
   ['world-addbody', addParts([{ angle: NaN }]), 'addBody: parts[0].angle must be a finite number, got NaN'],
   ['world-addbody', addParts([{ density: 0 }]), 'addBody: parts[0].density must be a positive number, got 0'],
+  ...['setTile', 'tileAt'].flatMap((call) => {
+    const e = `world-${call.toLowerCase()}`, map = (world) => world.addBody({ shape: 'tilemap', tileSize: [16, 16], columns: 4, rows: 2 });
+    return [
+      [e, () => gone().world[call](gone().body, 0, 0, 0), `${call}: this world was destroyed`],
+      [e, () => fresh().world[call](3, 0, 0, 0), `${call}: body must be a Body2D, got 3`],
+      [e, () => fresh().world[call](fresh().body, 0, 0, 0), `${call}: body belongs to another world`],
+      [e, () => { const { world, body } = dead(); world[call](body, 0, 0, 0); }, `${call}: body was removed`],
+      [e, () => { const { world, body } = fresh(); world[call](body, 0, 0, 0); }, `${call}: this body has no tilemap`],
+      [e, () => { const { world } = fresh(); world[call](map(world), 4, 0, 0); }, `${call}: x and y must be inside the 4 x 2 map, got 4,0`],
+    ];
+  }),
+  ['world-settile', () => { const { world } = fresh(); world.setTile(world.addBody({ shape: 'tilemap' }), 0, 0, -1); }, 'setTile: id must be a whole number that fits in 32 bits, got -1'],
   ['world-setbody', () => gone().world.setBody(gone().body, {}), 'setBody: this world was destroyed'],
   ['world-setbody', () => fresh().world.setBody(3, {}), 'setBody: body must be a Body2D, got 3'],
   ['world-setbody', () => fresh().world.setBody(fresh().body, {}), 'setBody: body belongs to another world'],

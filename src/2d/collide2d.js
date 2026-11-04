@@ -51,6 +51,23 @@ export class Core {
       }
     }
     this.radius = radius;
+    // Its centre among the body's, how far it reaches from there, and its
+    // thinnest width: for telling a compound's parts apart, and for tolerances.
+    let ox = 0, oy = 0;
+    for (let k = 0; k < n; k++) { ox += this.x[k]; oy += this.y[k]; }
+    this.ox = ox / n; this.oy = oy / n;
+    let far = 0;
+    for (let k = 0; k < n; k++) far = Math.max(far, (this.x[k] - this.ox) * (this.x[k] - this.ox) + (this.y[k] - this.oy) * (this.y[k] - this.oy));
+    this.reach = Math.sqrt(far) + radius;
+    let width = Infinity;
+    if (n >= 3) {
+      for (let k = 0; k < n; k++) {
+        let most = 0;
+        for (let j = 0; j < n; j++) most = Math.max(most, -((this.x[j] - this.x[k]) * this.nx[k] + (this.y[j] - this.y[k]) * this.ny[k]));
+        width = Math.min(width, most);
+      }
+    }
+    this.size = n >= 3 ? width + 2 * radius : 2 * radius;
   }
 }
 
@@ -93,7 +110,7 @@ export class Manifold2 {
 }
 
 // A point's name: the corner it sits at, and whose. a's corners from 0, b's from OF_B.
-const OF_B = 65536;
+export const OF_B = 65536;
 
 /** The side of `p` that every corner of `q` stands furthest past, as bestSide, and how far; -Infinity with no sides. */
 let bestSide = -1;
@@ -214,6 +231,31 @@ function clip(p, q, side, nx, ny, flip, margin, m) {
 export function collide(coreA, ax, ay, ac, as, coreB, bx, by, bc, bs, margin, tolerance, m) {
   A.place(coreA, ax, ay, ac, as);
   B.place(coreB, bx, by, bc, bs);
+  return placed(ax, ay, margin, tolerance, m);
+}
+
+/** As collide(), with b a bare line from (x1, y1) to (x2, y2): a side of a level. */
+export function collideSide(coreA, ax, ay, ac, as, x1, y1, x2, y2, margin, tolerance, m) {
+  A.place(coreA, ax, ay, ac, as);
+  const dx = x2 - x1, dy = y2 - y1, l = Math.sqrt(dx * dx + dy * dy), nx = dy / l, ny = -dx / l;
+  B.n = 2; B.r = 0;
+  B.x[0] = x1; B.y[0] = y1; B.x[1] = x2; B.y[1] = y2;
+  B.nx[0] = nx; B.ny[0] = ny; B.nx[1] = -nx; B.ny[1] = -ny;
+  return placed(ax, ay, margin, tolerance, m);
+}
+
+/**
+ * After collideSide() found its normal on the line's closed side: the manifold
+ * again, the line's open side the reference, whatever the corners say. A heap
+ * can press a small body past a floor line, centre and all, and a one-sided
+ * line that let go then would let it fall for good: it goes on being pushed
+ * back out the way it came.
+ */
+export function fromFront(margin, m) {
+  return (m.count = clip(B, A, 0, B.nx[0], B.ny[0], true, margin, m));
+}
+
+function placed(ax, ay, margin, tolerance, m) {
   const radii = A.r + B.r;
   const sa = furthest(A, B), sideA = bestSide, sb = furthest(B, A), sideB = bestSide;
   // A's side unless B's is better by more than a sliver: flipping back and

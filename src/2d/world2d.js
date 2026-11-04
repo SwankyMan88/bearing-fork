@@ -32,12 +32,13 @@ import { Slots, resized, MAX_ID, MAX_SLOTS } from '../core/slots.js';
 import { Body2D } from './body2d.js';
 import { compound, convexHull, plain } from './shapes2d.js';
 import { Core } from './collide2d.js';
-import { Contacts2D, PIXEL, makeSoft, meet, prepare, restitution, soft, solve, store, warmStart } from './contact2d.js';
+import { Chain, Tilemap } from './level2d.js';
+import { Contacts2D, PIXEL, makeSoft, meet, meetMany, prepare, restitution, soft, solve, store, warmStart } from './contact2d.js';
 import { Broad2D, Pairs2D, pairable } from './pairs2d.js';
 
 const WORLD_OPTIONS = ['gravity', 'substeps', 'sleeping'];
 const BODY_OPTIONS = [
-  'type', 'shape', 'size', 'radius', 'height', 'vertices', 'parts',
+  'type', 'shape', 'size', 'radius', 'height', 'vertices', 'parts', 'tileSize', 'columns', 'rows', 'tiles',
   'density', 'mass', 'inertia', 'centerOfMass',
   'friction', 'restitution', 'damping', 'angularDamping', 'gravityScale', 'layers', 'mask', 'group',
   'lockRotation', 'lockPosition',
@@ -45,13 +46,20 @@ const BODY_OPTIONS = [
 ];
 const PART_OPTIONS = ['shape', 'size', 'radius', 'height', 'vertices', 'position', 'angle', 'density'];
 const TYPES = ['dynamic', 'static', 'kinematic'];
-const SHAPES = ['box', 'circle', 'capsule', 'polygon', 'compound'];
+const SHAPES = ['box', 'circle', 'capsule', 'polygon', 'compound', 'tilemap', 'chain'];
 const PART_SHAPES = ['box', 'circle', 'capsule', 'polygon'];
 const DYNAMIC = 0, STATIC = 1, CIRCLE = 1;
 
 /** Which sizes each shape takes, so `a circle has no size` can be said. */
-const SIZES = { box: ['size'], circle: ['radius'], capsule: ['radius', 'height'], polygon: ['vertices'], compound: ['parts'] };
-const ALL_SIZES = ['size', 'radius', 'height', 'vertices', 'parts'];
+const SIZES = {
+  box: ['size'], circle: ['radius'], capsule: ['radius', 'height'], polygon: ['vertices'], compound: ['parts'],
+  tilemap: ['tileSize', 'columns', 'rows', 'tiles'], chain: ['vertices'],
+};
+const ALL_SIZES = ['size', 'radius', 'height', 'vertices', 'parts', 'tileSize', 'columns', 'rows', 'tiles'];
+/** Shapes with no mass, enclosing nothing or too much to move: static. */
+const LEVELS = ['tilemap', 'chain'];
+/** What a level has no use for. */
+const NOT_LEVEL = ['density', 'mass', 'inertia', 'centerOfMass', 'angle', 'angularVelocity', 'velocity'];
 
 // 9.8 m/s² at 100 px to the metre, y down; see the top of this file.
 const GRAVITY = [0, 980];
@@ -70,6 +78,8 @@ const SLEEP_TIME = 1;
 const DEFAULTS = Object.freeze({
   // A 1 m box, at 100 px to the metre, as 3D's default is a 1 m cube.
   type: 'dynamic', shape: 'box', size: [100, 100], radius: 50, height: 200, vertices: null, parts: null,
+  // One empty 16 px tile, a chain of one 100 px line, facing up.
+  tileSize: [16, 16], columns: 1, rows: 1, tiles: null,
   density: 0.1, mass: 0, massGiven: false, inertia: 0, inertiaGiven: false, centerOfMass: null,
   friction: 0.5, restitution: 0, damping: 0, angularDamping: 0, gravityScale: 1,
   // Everything collides with everything until told otherwise, as in 3D.
@@ -132,6 +142,7 @@ const COLUMNS = [
 const POSE = new Float64Array(3);
 /** Pairs read off a body's list before changing it: rows move as pairs are woken or dropped. */
 const WOKEN = [];
+const TOUCHED = [];
 
 export class World2D {
   constructor(options_) {
@@ -158,8 +169,12 @@ export class World2D {
     for (const [name, Type] of COLUMNS) this[name] = new Type(0);
     /** By slot: a polygon's corners, or a compound's parts, as given in option form; else null. */
     this._geometry = [];
-    /** By slot: its shape as the contact code wants it (collide2d.js), or null for a compound, as yet. */
+    /** By slot: its shape as the contact code wants it (collide2d.js), or null for a compound or a level. */
     this._core = [];
+    /** By slot: a compound's cores, or a body's one in a list, for pairs of many rows. */
+    this._cores = [];
+    /** By slot: a Tilemap or a Chain (level2d.js), or null. */
+    this._level = [];
     /** This step's manifolds (contact2d.js). */
     this._contacts = new Contacts2D();
     /** Bodies filed in trees, and the pairs near each other (pairs2d.js). */
@@ -282,19 +297,22 @@ export class World2D {
   bodyOf(body) {
     const s = this._slotOfBody('bodyOf', body);
     const spec = this._spec(s), out = { type: spec.type, shape: spec.shape };
-    for (const k of SIZES[spec.shape]) out[k] = k === 'size' || k === 'vertices' ? [...spec[k]] : k === 'parts' ? spec.parts.map(copyPart) : spec[k];
-    if (spec.massGiven) out.mass = spec.mass;
-    else out.density = spec.density;
-    // Not given reads back as null, which setBody and addBody take as "work it out".
-    out.inertia = spec.inertiaGiven ? spec.inertia : null;
-    out.centerOfMass = spec.centerOfMass === null ? null : [...spec.centerOfMass];
+    for (const k of SIZES[spec.shape]) out[k] = k === 'size' || k === 'vertices' || k === 'tileSize' ? [...spec[k]] : k === 'tiles' ? Uint32Array.from(spec.tiles) : k === 'parts' ? spec.parts.map(copyPart) : spec[k];
+    const level = LEVELS.includes(spec.shape);
+    if (!level) {
+      if (spec.massGiven) out.mass = spec.mass;
+      else out.density = spec.density;
+      // Not given reads back as null, which setBody and addBody take as "work it out".
+      out.inertia = spec.inertiaGiven ? spec.inertia : null;
+      out.centerOfMass = spec.centerOfMass === null ? null : [...spec.centerOfMass];
+    }
     out.friction = spec.friction; out.restitution = spec.restitution;
     out.damping = spec.damping; out.angularDamping = spec.angularDamping; out.gravityScale = spec.gravityScale;
     out.layers = spec.layers; out.mask = spec.mask; out.group = spec.group;
     out.lockRotation = spec.lockRotation;
     out.lockPosition = [...spec.lockPosition];
     out.position = [...spec.position];
-    out.angle = spec.angle;
+    if (!level) out.angle = spec.angle;
     if (spec.type !== 'static') {
       out.velocity = [...spec.velocity];
       out.angularVelocity = spec.angularVelocity;
@@ -305,6 +323,34 @@ export class World2D {
   /** Takes a body out. Removing one already gone does nothing, as in Winding. */
   remove(handle_) {
     this._remove('remove', handle_);
+  }
+
+  /** Tile (x, y) of a tilemap body: as Winding's scene.setTile, 0 for empty. What that uncovers wakes. */
+  setTile(body, x, y, id) {
+    const s = this._slotOfBody('setTile', body), map = this._mapOf('setTile', s, x, y);
+    if (!Number.isInteger(id) || id < 0 || id > 0xffffffff) fail('setTile', `id must be a whole number that fits in 32 bits, got ${show(id)}`);
+    map.tiles[y * map.columns + x] = id;
+    // Whatever's filed near the cell wakes: it may have stood on it, or now be in it.
+    const px = this._mapX(s) + x * map.tw, py = this._mapY(s) + y * map.th, m = this._broad.trees[0];
+    TOUCHED.length = 0;
+    m.query(px - map.tw, py - map.th, 0, px + 2 * map.tw, py + 2 * map.th, 0, (other) => { TOUCHED.push(other); });
+    for (let k = 0; k < TOUCHED.length; k++) this._wake(TOUCHED[k]);
+  }
+
+  /** Tile (x, y) of a tilemap body. */
+  tileAt(body, x, y) {
+    const s = this._slotOfBody('tileAt', body), map = this._mapOf('tileAt', s, x, y);
+    return map.tiles[y * map.columns + x];
+  }
+
+  /** Slot s's tilemap, with (x, y) checked to be in it. */
+  _mapOf(caller, s, x, y) {
+    const map = this._level[s];
+    if (!(map instanceof Tilemap)) fail(caller, 'this body has no tilemap');
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= map.columns || y >= map.rows) {
+      fail(caller, `x and y must be inside the ${map.columns} x ${map.rows} map, got ${show([x, y])}`);
+    }
+    return map;
   }
 
   /** A handle for a body's id. Doesn't check the body is alive. */
@@ -390,6 +436,8 @@ export class World2D {
     for (const [name, Type] of COLUMNS) this[name] = new Type(0);
     this._geometry = [];
     this._core = [];
+    this._cores = [];
+    this._level = [];
     this._contacts = new Contacts2D();
     this._broad = new Broad2D();
     this._pairs = new Pairs2D();
@@ -567,6 +615,8 @@ export class World2D {
     this._force[2 * s] = 0; this._force[2 * s + 1] = 0; this._torque[s] = 0;
     this._geometry[s] = null;
     this._core[s] = null;
+    this._cores[s] = null;
+    this._level[s] = null;
     if (this._lockMove[s] !== 0) { this._lockMove[s] = 0; this._lockMoveCount--; }
     this._unawaken(s);
     this._slots.release(s);
@@ -600,7 +650,7 @@ export class World2D {
   _resize(capacity) {
     this._slots.resize(capacity);
     for (const [name, , per] of COLUMNS) this[name] = resized(this[name], capacity * per);
-    for (const g of [this._geometry, this._core]) {
+    for (const g of [this._geometry, this._core, this._cores, this._level]) {
       const had = g.length;
       g.length = capacity;
       for (let s = had; s < capacity; s++) g[s] = null;
@@ -729,7 +779,11 @@ export class World2D {
       size: shape === 'box' ? [d[s3], d[s3 + 1]] : [...DEFAULTS.size],
       radius: shape === 'circle' || shape === 'capsule' ? d[s3] : DEFAULTS.radius,
       height: shape === 'capsule' ? d[s3 + 1] : DEFAULTS.height,
-      vertices: shape === 'polygon' ? g : null, parts: shape === 'compound' ? g : null,
+      vertices: shape === 'polygon' || shape === 'chain' ? g : null, parts: shape === 'compound' ? g : null,
+      tileSize: shape === 'tilemap' ? [this._level[s].tw, this._level[s].th] : DEFAULTS.tileSize,
+      columns: shape === 'tilemap' ? this._level[s].columns : DEFAULTS.columns,
+      rows: shape === 'tilemap' ? this._level[s].rows : DEFAULTS.rows,
+      tiles: shape === 'tilemap' ? this._level[s].tiles : null,
       density: this._density[s], mass: this._mass[s], massGiven: this._massGiven[s] === 1,
       inertia: this._inertia[s], inertiaGiven: this._inertiaGiven[s] === 1,
       centerOfMass: this._comGiven[s] === 1 ? [this._com[s2], this._com[s2 + 1]] : null,
@@ -748,7 +802,7 @@ export class World2D {
     const s2 = 2 * s, s3 = 3 * s, d = this._dims;
     this._type[s] = TYPES.indexOf(spec.type);
     this._shape[s] = SHAPES.indexOf(spec.shape);
-    this._geometry[s] = spec.shape === 'polygon' ? spec.vertices : spec.shape === 'compound' ? spec.parts : null;
+    this._geometry[s] = spec.shape === 'polygon' || spec.shape === 'chain' ? spec.vertices : spec.shape === 'compound' ? spec.parts : null;
     d[s3] = spec.shape === 'box' ? spec.size[0] : spec.radius;
     d[s3 + 1] = spec.shape === 'box' ? spec.size[1] : spec.height;
     this._density[s] = spec.density;
@@ -757,7 +811,11 @@ export class World2D {
     // densities of their own, so its mass is worked out as a whole, and scaled
     // to a mass given.
     let mass, moment, cx, cy;
-    if (spec.shape === 'compound') {
+    if (LEVELS.includes(spec.shape)) {
+      mass = 0; moment = 0; cy = 0;
+      cx = 0;
+      if (spec.shape === 'tilemap') { cx = spec.columns * spec.tileSize[0] * 0.5; cy = spec.rows * spec.tileSize[1] * 0.5; }
+    } else if (spec.shape === 'compound') {
       const m = compound(spec.parts, spec.density);
       mass = spec.massGiven ? spec.mass : m.mass;
       moment = m.moment * (mass / m.mass);
@@ -800,39 +858,65 @@ export class World2D {
     this._rest[4 * s + 2] = this._rotation[s2]; this._rest[4 * s + 3] = this._rotation[s2 + 1];
   }
 
-  /**
-   * Slot s's core, its corners from the centre of mass (cx, cy), and the size
-   * and reach everything else scales by. A compound has no core: step 4.
-   */
-  _shaped(s, spec, cx, cy) {
-    let corners = null, radius = 0;
-    if (spec.shape === 'box') {
-      const w = spec.size[0] * 0.5, h = spec.size[1] * 0.5;
+  /** Where a tilemap's top-left corner is: what its cells are counted from. */
+  _mapX(s) { return this._position[2 * s] - this._offset[2 * s]; }
+
+  _mapY(s) { return this._position[2 * s + 1] - this._offset[2 * s + 1]; }
+
+  /** One plain shape's core, turned and placed in its body's frame, centre of mass at (cx, cy). */
+  _coreOf(shape, size, radius_, height, vertices, x, y, angle, cx, cy) {
+    let corners, radius = 0;
+    if (shape === 'box') {
+      const w = size[0] * 0.5, h = size[1] * 0.5;
       corners = [-w, -h, w, -h, w, h, -w, h];
-    } else if (spec.shape === 'circle') {
-      corners = [0, 0]; radius = spec.radius;
-    } else if (spec.shape === 'capsule') {
-      const L = spec.height * 0.5 - spec.radius;
-      corners = [0, -L, 0, L]; radius = spec.radius;
-    } else if (spec.shape === 'polygon') {
-      corners = [...spec.vertices];
+    } else if (shape === 'circle') {
+      corners = [0, 0]; radius = radius_;
+    } else if (shape === 'capsule') {
+      const L = height * 0.5 - radius_;
+      corners = [0, -L, 0, L]; radius = radius_;
+    } else {
+      corners = [...vertices];
     }
-    if (corners === null) { this._core[s] = null; this._size[s] = 0; this._reach[s] = 0; return; }
-    for (let k = 0; k < corners.length; k += 2) { corners[k] -= cx; corners[k + 1] -= cy; }
-    const core = this._core[s] = new Core(corners, radius);
-    let reach = 0;
-    for (let k = 0; k < core.n; k++) reach = Math.max(reach, core.x[k] * core.x[k] + core.y[k] * core.y[k]);
-    this._reach[s] = Math.sqrt(reach) + radius;
-    // The thinnest width: across each side, the furthest corner.
-    let width = Infinity;
-    if (core.n >= 3) {
-      for (let k = 0; k < core.n; k++) {
-        let far = 0;
-        for (let j = 0; j < core.n; j++) far = Math.max(far, -((core.x[j] - core.x[k]) * core.nx[k] + (core.y[j] - core.y[k]) * core.ny[k]));
-        width = Math.min(width, far);
+    const c = cos(angle), z = sin(angle);
+    for (let k = 0; k < corners.length; k += 2) {
+      const u = corners[k], v = corners[k + 1];
+      corners[k] = x + c * u - z * v - cx;
+      corners[k + 1] = y + z * u + c * v - cy;
+    }
+    return new Core(corners, radius);
+  }
+
+  /** Slot s's core or cores, and the size and reach everything else scales by. */
+  _shaped(s, spec, cx, cy) {
+    this._level[s] = null;
+    this._core[s] = null;
+    if (spec.shape === 'tilemap' || spec.shape === 'chain') {
+      const level = spec.shape === 'tilemap' ? new Tilemap(spec.tileSize, spec.columns, spec.rows, spec.tiles) : new Chain(spec.vertices);
+      this._level[s] = level;
+      this._cores[s] = [];
+      this._size[s] = 0;
+      let reach = 0;
+      if (spec.shape === 'tilemap') reach = Math.sqrt(cx * cx + cy * cy);
+      else for (let k = 0; k < spec.vertices.length; k += 2) reach = Math.max(reach, Math.sqrt(spec.vertices[k] * spec.vertices[k] + spec.vertices[k + 1] * spec.vertices[k + 1]));
+      this._reach[s] = reach;
+      return;
+    }
+    if (spec.shape === 'compound') {
+      const list = spec.parts.map((p) => this._coreOf(p.shape, p.size, p.radius, p.height, p.vertices, p.position[0], p.position[1], p.angle, cx, cy));
+      this._cores[s] = list;
+      let reach = 0, size = Infinity;
+      for (const core of list) {
+        reach = Math.max(reach, Math.sqrt(core.ox * core.ox + core.oy * core.oy) + core.reach);
+        size = Math.min(size, core.size);
       }
+      this._reach[s] = reach;
+      this._size[s] = size;
+      return;
     }
-    this._size[s] = core.n >= 3 ? width + 2 * radius : 2 * radius;
+    const core = this._core[s] = this._coreOf(spec.shape, spec.size, spec.radius, spec.height, spec.vertices, 0, 0, 0, cx, cy);
+    this._cores[s] = [core];
+    this._reach[s] = Math.sqrt(core.ox * core.ox + core.oy * core.oy) + core.reach;
+    this._size[s] = core.size;
   }
 
   /**
@@ -856,15 +940,15 @@ export class World2D {
     for (let p = 0; p < pairs.active;) {
       const a = pairs.a[p], b = pairs.b[p];
       if (!broad.overlap(a, b)) { pairs.drop(p); continue; }
-      if (core[a] !== null && core[b] !== null) {
-        this._narrowed++;
-        if (meet(this, c, a, b, p, pairs)) {
-          // A sleeping body touched wakes, and its island's pairs join this walk.
-          if (island[a] !== 0) this._wake(a);
-          if (island[b] !== 0) this._wake(b);
-        } else {
-          pairs.ids[2 * p] = -1; pairs.ids[2 * p + 1] = -1; pairs.roll[p] = 0;
-        }
+      this._narrowed++;
+      // A compound or a level touches in many places; everything else, one.
+      const touched = core[a] !== null && core[b] !== null ? meet(this, c, a, b, p, pairs) : meetMany(this, c, a, b, p, pairs) > 0;
+      if (touched) {
+        // A sleeping body touched wakes, and its island's pairs join this walk.
+        if (island[a] !== 0) this._wake(a);
+        if (island[b] !== 0) this._wake(b);
+      } else {
+        pairs.ids[2 * p] = -1; pairs.ids[2 * p + 1] = -1; pairs.roll[p] = 0; pairs.extraCount[p] = 0;
       }
       p++;
     }
@@ -1063,6 +1147,22 @@ function corners(caller, name, value) {
   return hull;
 }
 
+function wholeOne(caller, name, value) {
+  if (!Number.isInteger(value) || value < 1) fail(caller, `${name} must be a whole number, 1 or more, got ${show(value)}`);
+  return value;
+}
+
+/** A chain's points: finite, two or more, and no two in a row the same, so every line has a direction. */
+function chainPoints(caller, name, value) {
+  const ok = value !== null && typeof value === 'object' && value.length >= 4 && value.length % 2 === 0
+    && Array.prototype.every.call(value, (x) => typeof x === 'number' && Number.isFinite(x));
+  if (!ok) fail(caller, `${name} must be 2 or more points, finite numbers, two to a point, got ${show(value)}`);
+  for (let k = 0; k + 3 < value.length; k += 2) {
+    if (value[k] === value[k + 2] && value[k + 1] === value[k + 3]) fail(caller, `${name} must not repeat a point, got ${show(value)}`);
+  }
+  return Array.from(value);
+}
+
 /** One sizes check, for a body or a part: `name` is how its options read in a message. */
 function sizes(caller, prefix, shape, o, base) {
   const out = { size: base.size, radius: base.radius, height: base.height, vertices: base.vertices };
@@ -1070,7 +1170,8 @@ function sizes(caller, prefix, shape, o, base) {
   if (has('size')) out.size = positive2(caller, `${prefix}size`, o.size);
   if (has('radius')) out.radius = positive(caller, `${prefix}radius`, o.radius);
   if (has('height')) out.height = positive(caller, `${prefix}height`, o.height);
-  if (has('vertices')) out.vertices = corners(caller, `${prefix}vertices`, o.vertices);
+  if (has('vertices')) out.vertices = shape === 'chain' ? chainPoints(caller, `${prefix}vertices`, o.vertices) : corners(caller, `${prefix}vertices`, o.vertices);
+  if (shape === 'chain' && out.vertices === null) out.vertices = [0, 0, 100, 0];
   if (shape === 'polygon' && out.vertices === null) out.vertices = convexHull([-50, -50, 50, -50, 50, 50, -50, 50]);
   if (shape === 'capsule' && out.height < 2 * out.radius) fail(caller, `${prefix}height must be at least twice radius (${2 * out.radius}), got ${show(out.height)}`);
   return out;
@@ -1093,10 +1194,31 @@ function part(caller, k, given) {
 function resolve(caller, base, given) {
   known(caller, given, BODY_OPTIONS);
   const has = (k) => given[k] !== undefined;
-  const type = has('type') ? oneOf(caller, 'type', given.type, TYPES) : base.type;
   const shape = has('shape') ? oneOf(caller, 'shape', given.shape, SHAPES) : base.shape;
+  const level = LEVELS.includes(shape);
+  let type = has('type') ? oneOf(caller, 'type', given.type, TYPES) : base.type;
+  if (level) {
+    if (has('type') && given.type !== 'static') fail(caller, `type must be 'static' for a ${shape}, got ${show(given.type)}`);
+    type = 'static';
+    for (const k of NOT_LEVEL) if (has(k)) fail(caller, `a ${shape} has no ${k}`);
+  }
   for (const k of ALL_SIZES) if (has(k) && !SIZES[shape].includes(k)) fail(caller, `a ${shape} has no ${k}`);
-  const { size, radius, height, vertices } = sizes(caller, '', shape, given, shape === base.shape ? base : DEFAULTS);
+  const from = shape === base.shape ? base : DEFAULTS;
+  const { size, radius, height, vertices } = sizes(caller, '', shape, given, from);
+  let { tileSize, columns, rows, tiles } = from;
+  if (shape === 'tilemap') {
+    if (has('tileSize')) tileSize = positive2(caller, 'tileSize', given.tileSize);
+    if (has('columns')) columns = wholeOne(caller, 'columns', given.columns);
+    if (has('rows')) rows = wholeOne(caller, 'rows', given.rows);
+    if (has('tiles')) {
+      const t = given.tiles, ok = t !== null && typeof t === 'object' && Array.prototype.every.call(t, (x) => Number.isInteger(x) && x >= 0 && x <= 0xffffffff);
+      if (!ok) fail(caller, `tiles must be whole numbers that fit in 32 bits, got ${show(t)}`);
+      tiles = Uint32Array.from(t);
+    } else if (tiles === null) {
+      tiles = new Uint32Array(columns * rows);
+    }
+    if (tiles.length !== columns * rows) fail(caller, `tiles holds ${tiles.length} ids; a ${columns} x ${rows} map needs ${columns * rows}`);
+  }
   let parts = shape === base.shape ? base.parts : null;
   if (has('parts')) {
     if (!Array.isArray(given.parts) || given.parts.length === 0) fail(caller, `parts must be a list of one or more parts, got ${show(given.parts)}`);
@@ -1152,7 +1274,7 @@ function resolve(caller, base, given) {
   const velocity = has('velocity') ? vec2(caller, 'velocity', given.velocity) : base.velocity;
   const angularVelocity = has('angularVelocity') ? finite(caller, 'angularVelocity', given.angularVelocity) : base.angularVelocity;
   return {
-    type, shape, size, radius, height, vertices, parts, density, mass, massGiven, inertia, inertiaGiven, centerOfMass,
+    type, shape, size, radius, height, vertices, parts, tileSize, columns, rows, tiles, density, mass, massGiven, inertia, inertiaGiven, centerOfMass,
     friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, lockRotation, lockPosition,
     position, angle, velocity, angularVelocity,
   };

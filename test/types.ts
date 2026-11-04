@@ -262,6 +262,9 @@ export function joints(): void {
   const shard: Body2D = flat.addBody({ shape: 'polygon', vertices: new Float32Array([0, 0, 6, 1, 4, 5]), position: [320, 96], angle: 0.3 });
   flat.addBody({ shape: 'compound', parts: [{ size: [12, 4], position: [6, 2] }, { shape: 'circle', radius: 3, density: 0.4 }] });
   flat.addBody({ type: 'kinematic', lockPosition: [false, true], lockRotation: true, inertia: null, centerOfMass: null });
+  const ground = flat.addBody({ shape: 'tilemap', tileSize: [16, 16], columns: 4, rows: 1, tiles: new Uint32Array(4) });
+  flat.addBody({ shape: 'chain', vertices: [0, 0, 100, 0], layers: 2, mask: 3, group: 1 });
+  flat.setTile(ground, 1, 0, flat.tileAt(ground, 0, 0) + 1);
   const read: BodyInfo2D = flat.bodyOf(shard);
   const at: Vec2 = read.position;
   const [x, y] = shard.position;
