@@ -59,7 +59,7 @@ export class Contacts2D {
   constructor() {
     this.count = 0;
     this.capacity = 0;
-    this.a = null; this.b = null; this.points = null; this.key = null;
+    this.a = null; this.b = null; this.points = null; this.pair = null;
     this.normal = null; this.friction = null; this.restitution = null; this.tolerance = null;
     this.patch = null; this.rollMass = null; this.rollImpulse = null; this.coupling = null; this.gap = null;
     this.id = null; this.ra = null; this.rb = null; this.adjusted = null;
@@ -70,7 +70,7 @@ export class Contacts2D {
 
   _alloc(c) {
     const grow = (name, Type, n) => { this[name] = this[name] ? resized(this[name], n) : new Type(n); };
-    grow('a', Int32Array, c); grow('b', Int32Array, c); grow('points', Uint8Array, c); grow('key', Float64Array, c);
+    grow('a', Int32Array, c); grow('b', Int32Array, c); grow('points', Uint8Array, c); grow('pair', Int32Array, c);
     grow('normal', Float64Array, 2 * c); grow('friction', Float64Array, c); grow('restitution', Float64Array, c);
     grow('tolerance', Float64Array, c); grow('patch', Float64Array, c); grow('rollMass', Float64Array, c);
     grow('rollImpulse', Float64Array, c); grow('coupling', Float64Array, c); grow('gap', Float64Array, c);
@@ -86,19 +86,19 @@ export class Contacts2D {
 const found = new Manifold2();
 
 /**
- * Whether slots a and b touch this step, and if so a row in c. `memory` is what
- * the pair pushed with last step, by point name, for the warm start.
+ * Whether slots a and b touch this step, and if so a row in c, starting from
+ * what the pair pushed with last step, by point name: the warm start.
  */
-export function meet(world, c, a, b, key, dt, memory) {
+export function meet(world, c, a, b, pair, pairs) {
   const coreA = world._core[a], coreB = world._core[b];
   const size = world._size, sa = size[a], sb = size[b];
   const tolerance = Math.min(sa, sb) * PIXEL;
   const motion = world._motion, margin = tolerance + motion[a] + motion[b];
   const p = world._position, r = world._rotation, a2 = 2 * a, b2 = 2 * b;
-  if (collide(coreA, p[a2], p[a2 + 1], r[a2], r[a2 + 1], coreB, p[b2], p[b2 + 1], r[b2], r[b2 + 1], margin, tolerance, found) === 0) return;
+  if (collide(coreA, p[a2], p[a2 + 1], r[a2], r[a2 + 1], coreB, p[b2], p[b2 + 1], r[b2], r[b2 + 1], margin, tolerance, found) === 0) return false;
   if (c.count === c.capacity) c._alloc(2 * c.capacity);
   const m = c.count++, nx = found.nx, ny = found.ny, m2 = 2 * m, m4 = 4 * m, count = found.count;
-  c.a[m] = a; c.b[m] = b; c.points[m] = count; c.key[m] = key;
+  c.a[m] = a; c.b[m] = b; c.points[m] = count; c.pair[m] = pair;
   c.normal[m2] = nx; c.normal[m2 + 1] = ny;
   // As in 3D: friction's geometric mean, so ice is slippery against anything;
   // restitution's larger, so a bouncy ball bounces off anything.
@@ -107,7 +107,8 @@ export function meet(world, c, a, b, key, dt, memory) {
   c.tolerance[m] = tolerance;
   const type = world._type, moves = 0;
   c.patch[m] = PIXEL * (type[a] !== moves ? sb : type[b] !== moves ? sa : Math.min(sa, sb));
-  c.rollImpulse[m] = memory !== undefined ? memory.roll : 0;
+  c.rollImpulse[m] = pairs.roll[pair];
+  const p2 = 2 * pair, id0 = pairs.ids[p2], id1 = pairs.ids[p2 + 1];
   for (let k = 0; k < 2; k++) {
     const i = m2 + k;
     if (k >= count) { c.normalImpulse[i] = 0; c.tangentImpulse[i] = 0; continue; }
@@ -118,10 +119,19 @@ export function meet(world, c, a, b, key, dt, memory) {
     // Separation at any later pose: (pb + rb - pa - ra)·n + adjusted.
     c.adjusted[i] = found.separation[k] - ((p[b2] + bx - p[a2] - ax) * nx + (p[b2 + 1] + by - p[a2 + 1] - ay) * ny);
     let n = 0, t = 0;
-    if (memory !== undefined) {
-      if (memory.id0 === id) { n = memory.n0; t = memory.t0; } else if (memory.id1 === id) { n = memory.n1; t = memory.t1; }
-    }
+    if (id0 === id) { n = pairs.normal[p2]; t = pairs.tangent[p2]; } else if (id1 === id) { n = pairs.normal[p2 + 1]; t = pairs.tangent[p2 + 1]; }
     c.normalImpulse[i] = n; c.tangentImpulse[i] = t;
+  }
+  return true;
+}
+
+/** What each manifold pushed with, kept by point name for the next step. */
+export function store(c, pairs) {
+  for (let m = 0; m < c.count; m++) {
+    const p2 = 2 * c.pair[m], m2 = 2 * m, two = c.points[m] === 2;
+    pairs.ids[p2] = c.id[m2]; pairs.normal[p2] = c.normalImpulse[m2]; pairs.tangent[p2] = c.tangentImpulse[m2];
+    pairs.ids[p2 + 1] = two ? c.id[m2 + 1] : -1; pairs.normal[p2 + 1] = c.normalImpulse[m2 + 1]; pairs.tangent[p2 + 1] = c.tangentImpulse[m2 + 1];
+    pairs.roll[c.pair[m]] = c.rollImpulse[m];
   }
 }
 

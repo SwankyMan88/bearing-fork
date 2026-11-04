@@ -53,6 +53,12 @@ export interface BodyOptions2D {
   angularDamping?: number;
   /** Default 1. */
   gravityScale?: number;
+  /** Which of 32 layers it is in, as bits. Default 1. */
+  layers?: number;
+  /** Which layers it collides with, as bits. Default 0xffffffff. */
+  mask?: number;
+  /** Bodies of the same group never collide with each other; any whole number. Default 0, none. */
+  group?: number;
   /** Whether it never turns. Default false. */
   lockRotation?: boolean;
   /** The axes it never moves along, x and y. Default [false, false]. */
@@ -85,6 +91,11 @@ export interface BodyInfo2D {
   damping: number;
   angularDamping: number;
   gravityScale: number;
+  /** Unsigned. */
+  layers: number;
+  /** Unsigned. */
+  mask: number;
+  group: number;
   lockRotation: boolean;
   lockPosition: [boolean, boolean];
   position: [number, number];
@@ -100,6 +111,8 @@ export interface WorldOptions2D {
   gravity?: Vec2;
   /** Default 8. */
   substeps?: number;
+  /** Whether bodies at rest go to sleep. Default true. */
+  sleeping?: boolean;
 }
 
 export class World2D {
@@ -108,6 +121,7 @@ export class World2D {
   get gravity(): readonly [number, number];
   set gravity(value: Vec2);
   substeps: number;
+  sleeping: boolean;
   readonly bodyCount: number;
   readonly stepCount: number;
   /** x, y, angle, per slot. */
@@ -119,6 +133,8 @@ export class World2D {
   bodyOf(body: Body2D): BodyInfo2D;
   remove(handle: Body2D): void;
   body(id: number): Body2D;
+  /** The slots of bodies that moved since step `since`. */
+  moved(since: number): Int32Array;
   step(dt: number): void;
   destroy(): void;
 }
@@ -128,6 +144,7 @@ export class Body2D {
   readonly id: number;
   readonly slot: number;
   readonly alive: boolean;
+  readonly asleep: boolean;
   readonly mass: number;
   readonly inertia: number;
   readonly position: readonly [number, number];

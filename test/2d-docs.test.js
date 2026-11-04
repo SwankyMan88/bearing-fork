@@ -75,7 +75,7 @@ const fresh = () => { const world = new World2D(); return { world, body: world.a
 const dead = () => { const f = fresh(); f.world.remove(f.body); return f; };
 const gone = () => { const f = fresh(); f.world.destroy(); return f; };
 
-const OPTIONS = 'type, shape, size, radius, height, vertices, parts, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, lockRotation, lockPosition, position, angle, velocity, angularVelocity';
+const OPTIONS = 'type, shape, size, radius, height, vertices, parts, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, lockRotation, lockPosition, position, angle, velocity, angularVelocity';
 
 const bodyCases = (call, run) => {
   const e = `world-${call.toLowerCase()}`;
@@ -102,6 +102,9 @@ const bodyCases = (call, run) => {
     [e, run({ damping: NaN }), `${call}: damping must be 0 or more, got NaN`],
     [e, run({ angularDamping: -1 }), `${call}: angularDamping must be 0 or more, got -1`],
     [e, run({ gravityScale: '1' }), `${call}: gravityScale must be a finite number, got '1'`],
+    [e, run({ layers: 0.5 }), `${call}: layers must be a whole number that fits in 32 bits, got 0.5`],
+    [e, run({ mask: 2 ** 32 }), `${call}: mask must be a whole number that fits in 32 bits, got 4294967296`],
+    [e, run({ group: -1 }), `${call}: group must be a whole number, 0 or more, got -1`],
     [e, run({ lockRotation: 1 }), `${call}: lockRotation must be true or false, got 1`],
     [e, run({ lockPosition: [true] }), `${call}: lockPosition must be 2 true or false values, got true`],
     [e, run({ position: [0, NaN] }), `${call}: position must be 2 finite numbers, got 0,NaN`],
@@ -117,9 +120,14 @@ const addParts = (parts) => () => fresh().world.addBody({ shape: 'compound', par
 const CASES = [
   ['world', () => new World2D(3), 'World2D: options must be an object, got 3'],
   ['world', () => new World2D({ gravty: [0, 0] }), "World2D: unknown option 'gravty' (did you mean 'gravity'?)"],
-  ['world', () => new World2D({ banana: 1 }), "World2D: unknown option 'banana' (the options are gravity, substeps)"],
+  ['world', () => new World2D({ banana: 1 }), "World2D: unknown option 'banana' (the options are gravity, substeps, sleeping)"],
   ['world', () => new World2D({ gravity: [0, 0, 0] }), 'World2D: gravity must be 2 finite numbers, got 0,0,0'],
   ['world', () => new World2D({ substeps: 0 }), 'World2D: substeps must be a whole number, 1 or more, got 0'],
+  ['world', () => new World2D({ sleeping: 1 }), 'World2D: sleeping must be true or false, got 1'],
+  ['world-sleeping', () => gone().world.sleeping, 'world.sleeping: this world was destroyed'],
+  ['world-sleeping', () => { fresh().world.sleeping = 1; }, 'world.sleeping must be true or false, got 1'],
+  ['world-moved', () => gone().world.moved(0), 'moved: this world was destroyed'],
+  ['world-moved', () => fresh().world.moved(-1), 'moved: since must be a whole number, 0 or more, got -1'],
   ['world-gravity', () => gone().world.gravity, 'world.gravity: this world was destroyed'],
   ['world-gravity', () => { fresh().world.gravity = [1]; }, 'world.gravity must be 2 finite numbers, got 1'],
   ['world-substeps', () => gone().world.substeps, 'world.substeps: this world was destroyed'],
@@ -163,6 +171,9 @@ const CASES = [
   ['world-body', () => fresh().world.body(-1), 'body: id must be a whole number from 0 to 9007199254740991, got -1'],
   ['world-step', () => gone().world.step(1), 'step: this world was destroyed'],
   ['world-step', () => fresh().world.step(0), 'step: dt must be a positive number of seconds, got 0'],
+  ['body-asleep', () => gone().body.asleep, 'body.asleep: this world was destroyed'],
+  ['body-asleep', () => dead().body.asleep, 'body.asleep: this body was removed'],
+  ['body-asleep', () => { fresh().body.asleep = true; }, 'body.asleep is read only'],
   ...['id', 'slot', 'world', 'alive'].map((p) => [`body-${p}`, () => { fresh().body[p] = 1; }, `body.${p} is read only`]),
   ...[['mass', 'setBody(body, { mass })'], ['inertia', 'setBody(body, { inertia })'], ['position', 'setPosition(x, y)'],
     ['angle', 'setAngle(radians)'], ['worldCenterOfMass', 'setBody(body, { centerOfMass })'], ['velocity', 'setVelocity(x, y)'],

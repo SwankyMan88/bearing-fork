@@ -2,8 +2,8 @@
 
 `bearing-physics/2d` is Bearing for a flat world: the same calls, options and errors as
 [the 3D reference](API.md), in pixels. This page lists every call. It grows as the 2D module does:
-for now, boxes, circles, capsules and polygons collide, stack and roll. A compound moves and turns
-but doesn't touch anything yet, and thousands of bodies wait for the next step.
+for now, boxes, circles, capsules and polygons collide, stack, roll and sleep, thousands at a time.
+A compound moves and turns but doesn't touch anything yet.
 
 ```js
 import { World2D } from 'bearing-physics/2d';
@@ -30,11 +30,11 @@ Everything in [the 3D reference's conventions](API.md#conventions) holds. These 
 
 ## Contents
 
-[World2D](#world-class) · [Body2D](#body) · [Contacts](#contacts)
+[World2D](#world-class) · [Body2D](#body) · [Contacts](#contacts) · [Sleeping](#sleeping)
 
 ## Index
 
-**A** &nbsp; [`world.addBody()`](#world-addbody) · [`body.alive`](#body-alive) · [`body.angle`](#body-angle) · [`body.angularVelocity`](#body-angularvelocity) · [`body.applyAngularImpulse()`](#body-applyangularimpulse) · [`body.applyForce()`](#body-applyforce) · [`body.applyImpulse()`](#body-applyimpulse) · [`body.applyTorque()`](#body-applytorque)
+**A** &nbsp; [`world.addBody()`](#world-addbody) · [`body.alive`](#body-alive) · [`body.asleep`](#body-asleep) · [`body.angle`](#body-angle) · [`body.angularVelocity`](#body-angularvelocity) · [`body.applyAngularImpulse()`](#body-applyangularimpulse) · [`body.applyForce()`](#body-applyforce) · [`body.applyImpulse()`](#body-applyimpulse) · [`body.applyTorque()`](#body-applytorque)
 
 **B** &nbsp; [Body2D](#body) · [`world.body()`](#world-body) · [`world.bodyCount`](#world-bodycount) · [`world.bodyOf()`](#world-bodyof)
 
@@ -46,13 +46,13 @@ Everything in [the 3D reference's conventions](API.md#conventions) holds. These 
 
 **I** &nbsp; [`body.id`](#body-id) · [`body.inertia`](#body-inertia)
 
-**M** &nbsp; [`body.mass`](#body-mass) · [`body.moveTo()`](#body-moveto)
+**M** &nbsp; [`body.mass`](#body-mass) · [`world.moved()`](#world-moved) · [`body.moveTo()`](#body-moveto)
 
 **P** &nbsp; [`body.position`](#body-position) · [`world.previous`](#world-previous)
 
 **R** &nbsp; [`world.remove()`](#world-remove)
 
-**S** &nbsp; [`body.setAngle()`](#body-setangle) · [`body.setAngularVelocity()`](#body-setangularvelocity) · [`world.setBody()`](#world-setbody) · [`body.setPosition()`](#body-setposition) · [`body.setVelocity()`](#body-setvelocity) · [`body.slot`](#body-slot) · [`world.step()`](#world-step) · [`world.stepCount`](#world-stepcount) · [`world.substeps`](#world-substeps)
+**S** &nbsp; [`body.setAngle()`](#body-setangle) · [`body.setAngularVelocity()`](#body-setangularvelocity) · [`world.setBody()`](#world-setbody) · [`body.setPosition()`](#body-setposition) · [`body.setVelocity()`](#body-setvelocity) · [`world.sleeping`](#world-sleeping) · [Sleeping](#sleeping) · [`body.slot`](#body-slot) · [`world.step()`](#world-step) · [`world.stepCount`](#world-stepcount) · [`world.substeps`](#world-substeps)
 
 **T** &nbsp; [`world.transforms`](#world-transforms)
 
@@ -74,8 +74,9 @@ Makes a world. Every option has a default.
 |---|---|---|
 | `gravity` | `[0, 980]` | What pulls dynamic bodies, px/s²: 9.8 m/s² downward on a y-down screen, at 100 px to the metre. |
 | `substeps` | `8` | How many smaller steps each step is solved in. |
+| `sleeping` | `true` | Whether bodies at rest go to sleep. |
 
-Throws: `World2D: options must be an object, got …`; `World2D: unknown option '…' (did you mean '…'?)`; `World2D: unknown option '…' (the options are gravity, substeps)`; `World2D: gravity must be 2 finite numbers, got …`; `World2D: substeps must be a whole number, 1 or more, got …`.
+Throws: `World2D: options must be an object, got …`; `World2D: unknown option '…' (did you mean '…'?)`; `World2D: unknown option '…' (the options are gravity, substeps, sleeping)`; `World2D: gravity must be 2 finite numbers, got …`; `World2D: substeps must be a whole number, 1 or more, got …`; `World2D: sleeping must be true or false, got …`.
 
 ```js
 const world = new World2D({ gravity: [0, 1600] });   // a game's own, heavier fall
@@ -103,6 +104,36 @@ Throws: `world.substeps: this world was destroyed`; `world.substeps must be a wh
 ```js
 world.substeps = 16;
 ```
+
+<a id="world-sleeping"></a>
+### `world.sleeping` → `boolean`
+
+Whether bodies at rest go to sleep: left out of every step until something disturbs them. See
+[Sleeping](#sleeping). Assign to change it, at any time; switching it off wakes every sleeping body.
+
+Throws: `world.sleeping: this world was destroyed`; `world.sleeping must be true or false, got …`.
+
+```js
+world.sleeping = false;
+```
+
+<a id="world-moved"></a>
+### `world.moved(since)` → `Int32Array`
+
+The slots of bodies that moved after step `since`, so a renderer copies only those: keep
+[`stepCount`](#world-stepcount) from your last copy and pass it. A world of 10,000 sleeping bodies
+gives none, and looks at none of them.
+
+Throws: `moved: this world was destroyed`; `moved: since must be a whole number, 0 or more, got …`.
+
+```js
+let drawn = world.stepCount;
+world.step(1 / 60);
+for (const slot of world.moved(drawn)) console.log(slot);
+drawn = world.stepCount;
+```
+
+Notes: a body put somewhere by hand counts as moved. Slots are reused once a body is removed.
 
 <a id="world-bodycount"></a>
 ### `world.bodyCount` → `number`
@@ -177,6 +208,9 @@ Adds a body. Every option has a default, so `addBody()` is a 100 px box, 1 m at 
 | `damping` | `0` | Speed lost per second, 1/s. |
 | `angularDamping` | `0` | Spin lost per second, 1/s. |
 | `gravityScale` | `1` | Multiplies the world's gravity for this body. |
+| `layers` | `1` | Which of 32 layers it is in, one bit each. Two bodies collide when each one's layers are in the other's `mask`, as in [3D](API.md#layers). |
+| `mask` | `0xffffffff` | Which layers it collides with, one bit each: all of them. |
+| `group` | `0` (none) | Bodies of the same group never collide with each other, whatever their layers: any whole number, so a body's `id` will do. |
 | `lockRotation` | `false` | Whether it never turns. |
 | `lockPosition` | `[false, false]` | The axes its centre of mass never moves along, x and y. |
 | `position` | `[0, 0]` | Its origin, px. |
@@ -186,7 +220,7 @@ Adds a body. Every option has a default, so `addBody()` is a 100 px box, 1 m at 
 
 Returns: a [`Body2D`](#body).
 
-Throws: `addBody: this world was destroyed`; `addBody: options must be an object, got …`; `addBody: unknown option '…' (did you mean '…'?)`; `addBody: unknown option '…' (the options are type, shape, size, radius, height, vertices, parts, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, lockRotation, lockPosition, position, angle, velocity, angularVelocity)`; `addBody: type must be 'dynamic', 'static' or 'kinematic', got …`; `addBody: shape must be 'box', 'circle', 'capsule', 'polygon' or 'compound', got …`; `addBody: a <shape> has no <option>`; `addBody: size must be 2 positive numbers, got …`; `addBody: radius must be a positive number, got …`; `addBody: height must be a positive number, got …`; `addBody: height must be at least twice radius (…), got …`; `addBody: vertices must be finite numbers, two to a vertex, got …`; `addBody: vertices must span an area (3 points not on one line), got …`; `addBody: parts must be a list of one or more parts, got …`; `addBody: parts[…] must be an object, got …`; `addBody: parts[…]: unknown option '…' (did you mean '…'?)`; `addBody: parts[…]: unknown option '…' (the options are shape, size, radius, height, vertices, position, angle, density)`; `addBody: parts[…].shape must be 'box', 'circle', 'capsule' or 'polygon', got …`; `addBody: parts[…]: a <shape> has no <option>`; `addBody: parts[…].size must be 2 positive numbers, got …`; `addBody: parts[…].radius must be a positive number, got …`; `addBody: parts[…].height must be a positive number, got …`; `addBody: parts[…].height must be at least twice radius (…), got …`; `addBody: parts[…].vertices must be finite numbers, two to a vertex, got …`; `addBody: parts[…].vertices must span an area (3 points not on one line), got …`; `addBody: parts[…].position must be 2 finite numbers, got …`; `addBody: parts[…].angle must be a finite number, got …`; `addBody: parts[…].density must be a positive number, got …`; `addBody: give mass or density, not both`; `addBody: mass must be a positive number, got …`; `addBody: density must be a positive number, got …`; `addBody: inertia must be a positive number, or null to follow the shape, got …`; `addBody: centerOfMass must be 2 finite numbers, got …`; `addBody: friction must be 0 or more, got …`; `addBody: restitution must be from 0 to 1, got …`; `addBody: damping must be 0 or more, got …`; `addBody: angularDamping must be 0 or more, got …`; `addBody: gravityScale must be a finite number, got …`; `addBody: lockRotation must be true or false, got …`; `addBody: lockPosition must be 2 true or false values, got …`; `addBody: position must be 2 finite numbers, got …`; `addBody: angle must be a finite number, got …`; `addBody: a static body has no velocity`; `addBody: a static body has no angularVelocity`; `addBody: velocity must be 2 finite numbers, got …`; `addBody: angularVelocity must be a finite number, got …`; `addBody: a world holds at most 16777216 bodies (the slot field of an id is 24 bits)`.
+Throws: `addBody: this world was destroyed`; `addBody: options must be an object, got …`; `addBody: unknown option '…' (did you mean '…'?)`; `addBody: unknown option '…' (the options are type, shape, size, radius, height, vertices, parts, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, lockRotation, lockPosition, position, angle, velocity, angularVelocity)`; `addBody: type must be 'dynamic', 'static' or 'kinematic', got …`; `addBody: shape must be 'box', 'circle', 'capsule', 'polygon' or 'compound', got …`; `addBody: a <shape> has no <option>`; `addBody: size must be 2 positive numbers, got …`; `addBody: radius must be a positive number, got …`; `addBody: height must be a positive number, got …`; `addBody: height must be at least twice radius (…), got …`; `addBody: vertices must be finite numbers, two to a vertex, got …`; `addBody: vertices must span an area (3 points not on one line), got …`; `addBody: parts must be a list of one or more parts, got …`; `addBody: parts[…] must be an object, got …`; `addBody: parts[…]: unknown option '…' (did you mean '…'?)`; `addBody: parts[…]: unknown option '…' (the options are shape, size, radius, height, vertices, position, angle, density)`; `addBody: parts[…].shape must be 'box', 'circle', 'capsule' or 'polygon', got …`; `addBody: parts[…]: a <shape> has no <option>`; `addBody: parts[…].size must be 2 positive numbers, got …`; `addBody: parts[…].radius must be a positive number, got …`; `addBody: parts[…].height must be a positive number, got …`; `addBody: parts[…].height must be at least twice radius (…), got …`; `addBody: parts[…].vertices must be finite numbers, two to a vertex, got …`; `addBody: parts[…].vertices must span an area (3 points not on one line), got …`; `addBody: parts[…].position must be 2 finite numbers, got …`; `addBody: parts[…].angle must be a finite number, got …`; `addBody: parts[…].density must be a positive number, got …`; `addBody: give mass or density, not both`; `addBody: mass must be a positive number, got …`; `addBody: density must be a positive number, got …`; `addBody: inertia must be a positive number, or null to follow the shape, got …`; `addBody: centerOfMass must be 2 finite numbers, got …`; `addBody: friction must be 0 or more, got …`; `addBody: restitution must be from 0 to 1, got …`; `addBody: damping must be 0 or more, got …`; `addBody: angularDamping must be 0 or more, got …`; `addBody: gravityScale must be a finite number, got …`; `addBody: layers must be a whole number that fits in 32 bits, got …`; `addBody: mask must be a whole number that fits in 32 bits, got …`; `addBody: group must be a whole number, 0 or more, got …`; `addBody: lockRotation must be true or false, got …`; `addBody: lockPosition must be 2 true or false values, got …`; `addBody: position must be 2 finite numbers, got …`; `addBody: angle must be a finite number, got …`; `addBody: a static body has no velocity`; `addBody: a static body has no angularVelocity`; `addBody: velocity must be 2 finite numbers, got …`; `addBody: angularVelocity must be a finite number, got …`; `addBody: a world holds at most 16777216 bodies (the slot field of an id is 24 bits)`.
 
 ```js
 const shard = world.addBody({ shape: 'polygon', vertices: [0, 0, 6, 1, 4, 5], position: [320, 96], angle: 0.3 });
@@ -205,7 +239,7 @@ its parts.
 Changes any of the options `addBody` took, and leaves the rest. Mass and inertia follow a new
 shape, unless given.
 
-Throws: `setBody: this world was destroyed`; `setBody: body must be a Body2D, got …`; `setBody: body belongs to another world`; `setBody: body was removed`; `setBody: changes must be an object, got …`; `setBody: unknown option '…' (did you mean '…'?)`; `setBody: unknown option '…' (the options are type, shape, size, radius, height, vertices, parts, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, lockRotation, lockPosition, position, angle, velocity, angularVelocity)`; `setBody: type must be 'dynamic', 'static' or 'kinematic', got …`; `setBody: shape must be 'box', 'circle', 'capsule', 'polygon' or 'compound', got …`; `setBody: a <shape> has no <option>`; `setBody: size must be 2 positive numbers, got …`; `setBody: radius must be a positive number, got …`; `setBody: height must be a positive number, got …`; `setBody: height must be at least twice radius (…), got …`; `setBody: vertices must be finite numbers, two to a vertex, got …`; `setBody: vertices must span an area (3 points not on one line), got …`; `setBody: parts must be a list of one or more parts, got …`; `setBody: give mass or density, not both`; `setBody: mass must be a positive number, got …`; `setBody: density must be a positive number, got …`; `setBody: inertia must be a positive number, or null to follow the shape, got …`; `setBody: centerOfMass must be 2 finite numbers, got …`; `setBody: friction must be 0 or more, got …`; `setBody: restitution must be from 0 to 1, got …`; `setBody: damping must be 0 or more, got …`; `setBody: angularDamping must be 0 or more, got …`; `setBody: gravityScale must be a finite number, got …`; `setBody: lockRotation must be true or false, got …`; `setBody: lockPosition must be 2 true or false values, got …`; `setBody: position must be 2 finite numbers, got …`; `setBody: angle must be a finite number, got …`; `setBody: a static body has no velocity`; `setBody: a static body has no angularVelocity`; `setBody: velocity must be 2 finite numbers, got …`; `setBody: angularVelocity must be a finite number, got …`.
+Throws: `setBody: this world was destroyed`; `setBody: body must be a Body2D, got …`; `setBody: body belongs to another world`; `setBody: body was removed`; `setBody: changes must be an object, got …`; `setBody: unknown option '…' (did you mean '…'?)`; `setBody: unknown option '…' (the options are type, shape, size, radius, height, vertices, parts, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, lockRotation, lockPosition, position, angle, velocity, angularVelocity)`; `setBody: type must be 'dynamic', 'static' or 'kinematic', got …`; `setBody: shape must be 'box', 'circle', 'capsule', 'polygon' or 'compound', got …`; `setBody: a <shape> has no <option>`; `setBody: size must be 2 positive numbers, got …`; `setBody: radius must be a positive number, got …`; `setBody: height must be a positive number, got …`; `setBody: height must be at least twice radius (…), got …`; `setBody: vertices must be finite numbers, two to a vertex, got …`; `setBody: vertices must span an area (3 points not on one line), got …`; `setBody: parts must be a list of one or more parts, got …`; `setBody: give mass or density, not both`; `setBody: mass must be a positive number, got …`; `setBody: density must be a positive number, got …`; `setBody: inertia must be a positive number, or null to follow the shape, got …`; `setBody: centerOfMass must be 2 finite numbers, got …`; `setBody: friction must be 0 or more, got …`; `setBody: restitution must be from 0 to 1, got …`; `setBody: damping must be 0 or more, got …`; `setBody: angularDamping must be 0 or more, got …`; `setBody: gravityScale must be a finite number, got …`; `setBody: layers must be a whole number that fits in 32 bits, got …`; `setBody: mask must be a whole number that fits in 32 bits, got …`; `setBody: group must be a whole number, 0 or more, got …`; `setBody: lockRotation must be true or false, got …`; `setBody: lockPosition must be 2 true or false values, got …`; `setBody: position must be 2 finite numbers, got …`; `setBody: angle must be a finite number, got …`; `setBody: a static body has no velocity`; `setBody: a static body has no angularVelocity`; `setBody: velocity must be 2 finite numbers, got …`; `setBody: angularVelocity must be a finite number, got …`.
 
 ```js
 world.setBody(ball, { shape: 'circle', radius: 16, type: 'static' });
@@ -217,7 +251,7 @@ world.setBody(ball, { shape: 'circle', radius: 16, type: 'static' });
 A copy of the body's options as they are now, in the form `addBody` takes, so
 `world.addBody(world.bodyOf(body))` makes a copy of it.
 
-Returns: `{ type, shape, …sizes, mass or density, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, lockRotation, lockPosition, position, angle, velocity, angularVelocity }`.
+Returns: `{ type, shape, …sizes, mass or density, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, lockRotation, lockPosition, position, angle, velocity, angularVelocity }`.
 `vertices` are a polygon's convex hull, `inertia` and `centerOfMass` `null` while they follow the
 shape, and a static body has no velocities.
 
@@ -323,6 +357,17 @@ Throws: `body.alive is read only`.
 
 ```js
 console.log(crate.alive);
+```
+
+<a id="body-asleep"></a>
+### `body.asleep` → `boolean`
+
+Whether it is asleep. Read only. See [Sleeping](#sleeping).
+
+Throws: `body.asleep: this world was destroyed`; `body.asleep: this body was removed`; `body.asleep is read only`.
+
+```js
+console.log(crate.asleep);
 ```
 
 <a id="body-mass"></a>
@@ -555,3 +600,17 @@ nothing needs tuning for size.
   as in 3D: a 40 by 20 px box on one ten times lighter sinks 0.26 px, on one 100 times lighter
   2.4 px, and on one 1,000 times lighter it flattens through it. Keep what stands on what within
   about 10 to 1.
+
+<a id="sleeping"></a>
+## Sleeping
+
+A body that has stopped is put to sleep: left out of every step, at no cost, until something
+disturbs it. 5,000 shards at rest step in 0.0001 ms. There is nothing to call.
+
+- **Islands sleep together.** Bodies touching each other form an island, and it sleeps when every
+  one of them has stayed within its tolerance of where it rested for 1 s. Static bodies join no
+  island, or everything on one floor would be one.
+- **Anything that disturbs it wakes it:** being touched by something awake, or any setter, force or
+  impulse on it or on what it rests on, or removing what holds it up. There is no call to make.
+- **A sleeping body keeps its place in [`transforms`](#world-transforms),** and
+  [`moved`](#world-moved) leaves it out.

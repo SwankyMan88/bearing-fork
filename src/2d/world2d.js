@@ -32,13 +32,14 @@ import { Slots, resized, MAX_ID, MAX_SLOTS } from '../core/slots.js';
 import { Body2D } from './body2d.js';
 import { compound, convexHull, plain } from './shapes2d.js';
 import { Core } from './collide2d.js';
-import { Contacts2D, PIXEL, makeSoft, meet, prepare, restitution, soft, solve, warmStart } from './contact2d.js';
+import { Contacts2D, PIXEL, makeSoft, meet, prepare, restitution, soft, solve, store, warmStart } from './contact2d.js';
+import { Broad2D, Pairs2D, pairable } from './pairs2d.js';
 
-const WORLD_OPTIONS = ['gravity', 'substeps'];
+const WORLD_OPTIONS = ['gravity', 'substeps', 'sleeping'];
 const BODY_OPTIONS = [
   'type', 'shape', 'size', 'radius', 'height', 'vertices', 'parts',
   'density', 'mass', 'inertia', 'centerOfMass',
-  'friction', 'restitution', 'damping', 'angularDamping', 'gravityScale',
+  'friction', 'restitution', 'damping', 'angularDamping', 'gravityScale', 'layers', 'mask', 'group',
   'lockRotation', 'lockPosition',
   'position', 'angle', 'velocity', 'angularVelocity',
 ];
@@ -62,12 +63,17 @@ const SPIN = Math.PI;
 // well past critically damped, so overlaps ease out without a bounce.
 const STIFFNESS = 1 / 8;
 const DAMPING_RATIO = 10;
+// How long a body stays within its tolerance of where it rested before its
+// island may sleep: 3D's measure (world.js, SLEEP_TIME).
+const SLEEP_TIME = 1;
 
 const DEFAULTS = Object.freeze({
   // A 1 m box, at 100 px to the metre, as 3D's default is a 1 m cube.
   type: 'dynamic', shape: 'box', size: [100, 100], radius: 50, height: 200, vertices: null, parts: null,
   density: 0.1, mass: 0, massGiven: false, inertia: 0, inertiaGiven: false, centerOfMass: null,
   friction: 0.5, restitution: 0, damping: 0, angularDamping: 0, gravityScale: 1,
+  // Everything collides with everything until told otherwise, as in 3D.
+  layers: 1, mask: 0xffffffff, group: 0,
   lockRotation: false, lockPosition: [false, false],
   position: [0, 0], angle: 0, velocity: [0, 0], angularVelocity: 0,
 });
@@ -101,10 +107,21 @@ const COLUMNS = [
   ['_damping', Float64Array, 1],
   ['_angularDamping', Float64Array, 1],
   ['_gravityScale', Float64Array, 1],
+  ['_layers', Uint32Array, 1],       // which of 32 layers it is in, as bits
+  ['_mask', Uint32Array, 1],         // which it collides with
+  ['_group', Float64Array, 1],       // bodies of one group, but 0, never collide
   ['_lockRotation', Uint8Array, 1],
   ['_lockMove', Uint8Array, 1],      // bit 0: never moves along x; bit 1: along y
   ['_inAwake', Int32Array, 1],       // 1 + its place in _awakeList, or 0
   ['_awakeList', Int32Array, 1],
+  ['_island', Int32Array, 1],        // asleep: 1 + the first of its island; else 0
+  ['_islandNext', Int32Array, 1],    // 1 + the next of its island, or 0
+  ['_still', Float64Array, 1],       // seconds within its tolerance of _rest
+  ['_calm', Uint8Array, 1],          // stayed there a whole SLEEP_TIME: ready to sleep
+  ['_rest', Float64Array, 4],        // the pose it is measured from: x, y, cos, sin
+  ['_parent', Int32Array, 1],        // union-find, while islands are made
+  ['_blocked', Uint8Array, 1],       // and whether a root's island has anyone not calm
+  ['_movedAt', Float64Array, 1],     // the step it last moved in
   ['_size', Float64Array, 1],        // the shape's thinnest width, px: what its tolerances follow
   ['_reach', Float64Array, 1],       // the furthest it reaches from its centre of mass, px
   ['_motion', Float64Array, 1],      // how far it can move this step, px
@@ -113,6 +130,8 @@ const COLUMNS = [
 ];
 
 const POSE = new Float64Array(3);
+/** Pairs read off a body's list before changing it: rows move as pairs are woken or dropped. */
+const WOKEN = [];
 
 export class World2D {
   constructor(options_) {
@@ -120,6 +139,7 @@ export class World2D {
     known('World2D', o, WORLD_OPTIONS);
     this._gravity = o.gravity === undefined ? [...GRAVITY] : vec2('World2D', 'gravity', o.gravity);
     this._substeps = o.substeps === undefined ? SUBSTEPS : whole('World2D', 'substeps', o.substeps);
+    this._sleeping = o.sleeping === undefined ? true : flag('World2D', 'sleeping', o.sleeping);
     this._slots = new Slots();
     // Every column named first, then made: an object given more than a dozen
     // fields by computed name becomes a dictionary (world.js, FAST PROPERTIES).
@@ -131,6 +151,8 @@ export class World2D {
     this._torque = null; this._forced = null; this._friction = null; this._restitution = null;
     this._damping = null; this._angularDamping = null; this._gravityScale = null;
     this._lockRotation = null; this._lockMove = null; this._inAwake = null; this._awakeList = null;
+    this._layers = null; this._mask = null; this._group = null; this._island = null; this._islandNext = null;
+    this._still = null; this._calm = null; this._rest = null; this._parent = null; this._blocked = null; this._movedAt = null;
     this._size = null; this._reach = null; this._motion = null;
     this._transforms = null; this._previous = null;
     for (const [name, Type] of COLUMNS) this[name] = new Type(0);
@@ -140,9 +162,14 @@ export class World2D {
     this._core = [];
     /** This step's manifolds (contact2d.js). */
     this._contacts = new Contacts2D();
-    /** What each touching pair pushed with last step, by pair, for the warm start. See _narrow. */
-    this._memory = new Map();
-    this._memoryNext = new Map();
+    /** Bodies filed in trees, and the pairs near each other (pairs2d.js). */
+    this._broad = new Broad2D();
+    this._pairs = new Pairs2D();
+    /** Slots that stopped moving, for moved(): a list, so a world at rest walks none of it. */
+    this._stopped = [];
+    this._stoppedFloor = 0;
+    /** Times a pair was tested for touching: for the off-means-off test, which reads it. */
+    this._narrowed = 0;
     /** Slots with a force or torque waiting: a step with none applied looks at nothing (rule 28). */
     this._forcedSlots = [];
     this._awakeCount = 0;
@@ -164,6 +191,18 @@ export class World2D {
     this._substeps = whole(null, 'world.substeps', value);
   }
 
+  /** Whether bodies at rest go to sleep. Switching it off wakes every sleeping body. */
+  get sleeping() {
+    this._live('world.sleeping');
+    return this._sleeping;
+  }
+
+  set sleeping(value) {
+    this._live('world.sleeping');
+    this._sleeping = flag(null, 'world.sleeping', value);
+    if (!value) this._wakeAll();
+  }
+
   /** px/s². A copy; assign a new value to change it. */
   get gravity() {
     this._live('world.gravity');
@@ -173,6 +212,8 @@ export class World2D {
   set gravity(value) {
     this._live('world.gravity');
     this._gravity = vec2(null, 'world.gravity', value);
+    // What held a body at rest may not now: every sleeping body wakes (rule 36).
+    this._wakeAll();
   }
 
   get stepCount() {
@@ -214,6 +255,8 @@ export class World2D {
       s = this._slots.take();
     }
     this._write(s, spec);
+    this._stamp(s);
+    this._broad.add(this, s);
     if (this._type[s] !== STATIC) this._awaken(s);
     return new Body2D(this, this._slots.id(s));
   }
@@ -221,9 +264,19 @@ export class World2D {
   setBody(body, changes) {
     const s = this._slotOfBody('setBody', body);
     const spec = resolve('setBody', this._spec(s), options('setBody', changes, 'changes'));
+    // Any change can change what holds it, so it and what touches it wake (rule 36).
+    this._wake(s);
+    this._wakeTouching(s);
     this._write(s, spec);
+    this._stamp(s);
     if (this._type[s] === STATIC) this._unawaken(s);
     else this._awaken(s);
+    // Its filtering or type may have changed: what can't pair now goes, and it asks again.
+    const pairs = this._pairs;
+    WOKEN.length = 0;
+    for (let e = pairs.head[s] - 1; e >= 0; e = pairs.next[e] - 1) WOKEN.push(pairs.a[e >> 1], pairs.b[e >> 1]);
+    for (let k = 0; k < WOKEN.length; k += 2) if (!pairable(this, WOKEN[k], WOKEN[k + 1])) pairs.drop(pairs.find(WOKEN[k], WOKEN[k + 1]));
+    this._broad.refile(this, s);
   }
 
   bodyOf(body) {
@@ -237,6 +290,7 @@ export class World2D {
     out.centerOfMass = spec.centerOfMass === null ? null : [...spec.centerOfMass];
     out.friction = spec.friction; out.restitution = spec.restitution;
     out.damping = spec.damping; out.angularDamping = spec.angularDamping; out.gravityScale = spec.gravityScale;
+    out.layers = spec.layers; out.mask = spec.mask; out.group = spec.group;
     out.lockRotation = spec.lockRotation;
     out.lockPosition = [...spec.lockPosition];
     out.position = [...spec.position];
@@ -258,6 +312,27 @@ export class World2D {
     this._live('body');
     if (!Number.isInteger(id) || id < 0 || id > MAX_ID) fail('body', `id must be a whole number from 0 to ${MAX_ID}, got ${show(id)}`);
     return new Body2D(this, id);
+  }
+
+  /**
+   * The slots of bodies that moved since step `since`, so a renderer copies
+   * only those: a world of 10,000 sleeping bodies copies none.
+   */
+  moved(since) {
+    this._live('moved');
+    if (!Number.isInteger(since) || since < 0) fail('moved', `since must be a whole number, 0 or more, got ${show(since)}`);
+    const out = [], at = this._movedAt, seen = new Set(), list = this._awakeList;
+    if (since < this._stoppedFloor) {
+      for (let s = 0; s < this._slots.top; s++) if (this._slots.state[s] === 1 && at[s] > since) out.push(s);
+      return Int32Array.from(out);
+    }
+    for (let i = 0; i < this._awakeCount; i++) if (at[list[i]] > since) { out.push(list[i]); seen.add(list[i]); }
+    const stopped = this._stopped;
+    for (let i = stopped.length - 2; i >= 0 && stopped[i + 1] > since; i -= 2) {
+      const s = stopped[i];
+      if (!seen.has(s) && this._slots.state[s] === 1 && at[s] > since) { out.push(s); seen.add(s); }
+    }
+    return Int32Array.from(out);
   }
 
   /** Moves the world on by `dt` seconds, exactly. */
@@ -293,8 +368,8 @@ export class World2D {
     if (touching) {
       restitution(this, c, gravity);
       if (pins) this._pin();
+      store(c, this._pairs);
     }
-    this._remember();
     const angle = this._angle;
     for (let i = 0; i < this._awakeCount; i++) {
       const s = list[i], s2 = 2 * s, c = r[s2], z = r[s2 + 1], c0 = turn[s2], z0 = turn[s2 + 1];
@@ -302,7 +377,9 @@ export class World2D {
       // but for a circle, whose `angle` may lose whole turns at such speeds.
       if (c !== c0 || z !== z0) angle[s] += atan2(z * c0 - c * z0, c * c0 + z * z0);
       this._place(s);
+      this._movedAt[s] = this._stepCount;
     }
+    if (this._sleeping) this._sleep(dt);
   }
 
   /** Lets go of everything. Using the world afterwards throws; calling this again does nothing. */
@@ -314,8 +391,9 @@ export class World2D {
     this._geometry = [];
     this._core = [];
     this._contacts = new Contacts2D();
-    this._memory = new Map();
-    this._memoryNext = new Map();
+    this._broad = new Broad2D();
+    this._pairs = new Pairs2D();
+    this._stopped = [];
     this._forcedSlots = [];
     this._awakeCount = 0;
     this._lockMoveCount = 0;
@@ -345,6 +423,10 @@ export class World2D {
     return Object.freeze([column[2 * s], column[2 * s + 1]]);
   }
 
+  _asleepOf(caller, id) {
+    return this._island[this._slotOf(caller, id)] !== 0;
+  }
+
   _massOf(caller, id) {
     return this._mass[this._slotOf(caller, id)];
   }
@@ -370,21 +452,20 @@ export class World2D {
     const s = this._slotOf(caller, id), at = xy(caller, x, y);
     this._pose(s);
     this._put(s, at[0], at[1], POSE[2]);
-    this._place(s);
-    this._settled(s);
+    this._moved(s);
   }
 
   _setAngle(caller, id, radians) {
     const s = this._slotOf(caller, id);
     this._pose(s);
     this._put(s, POSE[0], POSE[1], radians);
-    this._place(s);
-    this._settled(s);
+    this._moved(s);
   }
 
   _setVelocity(caller, id, x, y) {
     const s = this._slotOf(caller, id), v = xy(caller, x, y);
     if (this._type[s] === STATIC) fail(caller, 'a static body has no velocity');
+    this._wake(s);
     this._velocity[2 * s] = v[0]; this._velocity[2 * s + 1] = v[1];
     this._pinned(s);
   }
@@ -393,6 +474,7 @@ export class World2D {
     const s = this._slotOf(caller, id);
     finite(caller, 'radians', radians);
     if (this._type[s] === STATIC) fail(caller, 'a static body has no angularVelocity');
+    this._wake(s);
     if (this._lockRotation[s] === 0) this._angular[s] = radians;
   }
 
@@ -407,6 +489,7 @@ export class World2D {
     if (angle !== null && angle !== undefined) finite(caller, 'angle', angle);
     if (typeof dt !== 'number' || !(dt > 0) || dt === Infinity) fail(caller, `dt must be a positive number, got ${show(dt)}`);
     if (this._type[s] === STATIC) fail(caller, 'a static body has no velocity');
+    this._wake(s);
     const s2 = 2 * s, c = this._rotation[s2], z = this._rotation[s2 + 1];
     let tc = c, tz = z;
     if (angle !== null && angle !== undefined) { tc = cos(angle); tz = sin(angle); }
@@ -426,6 +509,7 @@ export class World2D {
     const s = this._slotOf(caller, id), f = vec2(caller, 'force', force);
     const at = point === undefined ? null : vec2(caller, 'point', point);
     if (this._type[s] !== DYNAMIC) return;
+    this._wake(s);
     const s2 = 2 * s;
     this._force[s2] += f[0]; this._force[s2 + 1] += f[1];
     if (at) this._torque[s] += (at[0] - this._position[s2]) * f[1] - (at[1] - this._position[s2 + 1]) * f[0];
@@ -436,6 +520,7 @@ export class World2D {
     const s = this._slotOf(caller, id);
     finite(caller, 'torque', torque);
     if (this._type[s] !== DYNAMIC) return;
+    this._wake(s);
     this._torque[s] += torque;
     this._queue(s);
   }
@@ -444,6 +529,7 @@ export class World2D {
     const s = this._slotOf(caller, id), j = vec2(caller, 'impulse', impulse);
     const at = point === undefined ? null : vec2(caller, 'point', point);
     if (this._type[s] !== DYNAMIC) return;
+    this._wake(s);
     const s2 = 2 * s, m = this._invMass[s];
     this._velocity[s2] += j[0] * m; this._velocity[s2 + 1] += j[1] * m;
     this._pinned(s);
@@ -454,6 +540,7 @@ export class World2D {
     const s = this._slotOf(caller, id);
     finite(caller, 'impulse', impulse);
     if (this._type[s] !== DYNAMIC) return;
+    this._wake(s);
     this._angular[s] += this._invInertia[s] * impulse;
   }
 
@@ -469,6 +556,12 @@ export class World2D {
     if (!(body instanceof Body2D)) fail(caller, `handle must be a Body2D, got ${show(body)}`);
     const s = handle(caller, 'handle', body, this, Body2D, this._slots, true);
     if (s < 0) return;
+    // What it was holding up wakes, and its pairs go with it.
+    this._wake(s);
+    this._wakeTouching(s);
+    const pairs = this._pairs;
+    while (pairs.head[s] !== 0) pairs.drop((pairs.head[s] - 1) >> 1);
+    this._broad.remove(s);
     // A force waiting on this slot must not land on whichever body gets it next.
     this._forced[s] = 0;
     this._force[2 * s] = 0; this._force[2 * s + 1] = 0; this._torque[s] = 0;
@@ -484,6 +577,8 @@ export class World2D {
       while (capacity < top) capacity *= 2;
       this._resize(capacity);
     }
+    pairs.trim();
+    this._broad.trim();
   }
 
   // ---- inside ----
@@ -510,6 +605,8 @@ export class World2D {
       g.length = capacity;
       for (let s = had; s < capacity; s++) g[s] = null;
     }
+    this._pairs.resize(capacity);
+    this._broad.resize(capacity);
   }
 
   _awaken(s) {
@@ -525,6 +622,70 @@ export class World2D {
     this._awakeList[i] = last;
     this._inAwake[last] = i + 1;
     this._inAwake[s] = 0;
+  }
+
+  /** Slot s's island, if it is asleep, back among the awake, and every pair of theirs looked at again. */
+  _wake(s) {
+    if (this._island[s] === 0) return;
+    const pairs = this._pairs, r = this._rotation, turn = this._startTurn;
+    for (let b = this._island[s] - 1; b >= 0;) {
+      const next = this._islandNext[b] - 1, b2 = 2 * b, t3 = 3 * b;
+      this._island[b] = 0; this._islandNext[b] = 0;
+      this._awaken(b);
+      this._still[b] = 0; this._calm[b] = 0;
+      this._rest[4 * b] = this._position[b2]; this._rest[4 * b + 1] = this._position[b2 + 1];
+      this._rest[4 * b + 2] = r[b2]; this._rest[4 * b + 3] = r[b2 + 1];
+      // Woken by a touch in the middle of finding contacts: this step's start is now.
+      turn[b2] = r[b2]; turn[b2 + 1] = r[b2 + 1];
+      this._previous[t3] = this._transforms[t3]; this._previous[t3 + 1] = this._transforms[t3 + 1]; this._previous[t3 + 2] = this._transforms[t3 + 2];
+      // Waking a pair swaps rows, which moves edges, so the list is read first.
+      WOKEN.length = 0;
+      for (let e = pairs.head[b] - 1; e >= 0; e = pairs.next[e] - 1) if ((e >> 1) >= pairs.active) WOKEN.push(pairs.a[e >> 1], pairs.b[e >> 1]);
+      for (let k = 0; k < WOKEN.length; k += 2) pairs.wake(pairs.find(WOKEN[k], WOKEN[k + 1]));
+      b = next;
+    }
+  }
+
+  _wakeAll() {
+    for (let s = 0; s < this._slots.top; s++) if (this._island[s] !== 0) this._wake(s);
+  }
+
+  /** Everything touching slot s wakes. */
+  _wakeTouching(s) {
+    const pairs = this._pairs;
+    for (let e = pairs.head[s] - 1; e >= 0;) {
+      const p = e >> 1, other = pairs.a[p] === s ? pairs.b[p] : pairs.a[p];
+      if (this._island[other] === 0) { e = pairs.next[e] - 1; continue; }
+      this._wake(other);
+      e = pairs.head[s] - 1;   // waking moved rows: from the top, the woken now awake
+    }
+  }
+
+  /** Moved by hand between steps: it counts from the next step, so moved(stepCount) sees it. */
+  _stamp(s) {
+    this._movedAt[s] = this._stepCount + 1;
+    this._note(s, this._stepCount + 1);
+  }
+
+  /** On the list moved() reads for what isn't awake; kept to twice the storage, its oldest half dropped. */
+  _note(s, stamp) {
+    const list = this._stopped;
+    list.push(s, stamp);
+    if (list.length > 2 * Math.max(this._slots.capacity, 64) * 2) {
+      const half = list.length >> 1 & ~1;
+      this._stoppedFloor = list[half - 1];
+      list.splice(0, half);
+    }
+  }
+
+  /** After a teleport: drawn there, stamped, filed afresh, and what a static body held woken. */
+  _moved(s) {
+    this._place(s);
+    this._settled(s);
+    this._stamp(s);
+    this._wake(s);
+    if (this._type[s] === STATIC) this._wakeTouching(s);
+    this._broad.refile(this, s);
   }
 
   /** Slot s's origin and angle as the API has them, into POSE. */
@@ -574,6 +735,7 @@ export class World2D {
       centerOfMass: this._comGiven[s] === 1 ? [this._com[s2], this._com[s2 + 1]] : null,
       friction: this._friction[s], restitution: this._restitution[s], damping: this._damping[s],
       angularDamping: this._angularDamping[s], gravityScale: this._gravityScale[s],
+      layers: this._layers[s], mask: this._mask[s], group: this._group[s],
       lockRotation: this._lockRotation[s] === 1,
       lockPosition: [(this._lockMove[s] & 1) !== 0, (this._lockMove[s] & 2) !== 0],
       position: [POSE[0], POSE[1]], angle: POSE[2],
@@ -621,6 +783,7 @@ export class World2D {
     this._friction[s] = spec.friction; this._restitution[s] = spec.restitution;
     this._damping[s] = spec.damping; this._angularDamping[s] = spec.angularDamping;
     this._gravityScale[s] = spec.gravityScale;
+    this._layers[s] = spec.layers; this._mask[s] = spec.mask; this._group[s] = spec.group;
     this._lockRotation[s] = spec.lockRotation ? 1 : 0;
     const held = (spec.lockPosition[0] ? 1 : 0) | (spec.lockPosition[1] ? 2 : 0);
     this._lockMoveCount += (held !== 0 ? 1 : 0) - (this._lockMove[s] !== 0 ? 1 : 0);
@@ -632,6 +795,9 @@ export class World2D {
     this._pinned(s);
     this._place(s);
     this._settled(s);
+    this._still[s] = 0; this._calm[s] = 0;
+    this._rest[4 * s] = this._position[s2]; this._rest[4 * s + 1] = this._position[s2 + 1];
+    this._rest[4 * s + 2] = this._rotation[s2]; this._rest[4 * s + 3] = this._rotation[s2 + 1];
   }
 
   /**
@@ -673,46 +839,110 @@ export class World2D {
    * This step's manifolds, and how far each body can move in it: speed, plus
    * what gravity adds, plus spin times reach (a circle's spin moves nothing),
    * all over dt. Two bodies further apart than the sum of theirs can't meet.
-   * ponytail: every pair, O(n²), and a Map of objects for the warm start, which
-   * allocates; step 3 of the plan gives this the tree and a pair list.
    */
   _narrow(dt, gravity) {
     const list = this._awakeList, n = this._awakeCount, v = this._velocity, w = this._angular;
-    const motion = this._motion, reach = this._reach, shape = this._shape, type = this._type, size = this._size;
+    const motion = this._motion, reach = this._reach, shape = this._shape, type = this._type;
     for (let i = 0; i < n; i++) {
       const s = list[i], s2 = 2 * s;
       const speed = Math.sqrt(v[s2] * v[s2] + v[s2 + 1] * v[s2 + 1]) + (type[s] === DYNAMIC ? gravity * dt : 0);
       motion[s] = (speed + (shape[s] === CIRCLE ? 0 : Math.abs(w[s]) * reach[s])) * dt;
     }
-    const c = this._contacts, core = this._core, p = this._position, top = this._slots.top, state = this._slots.state;
+    const broad = this._broad, pairs = this._pairs, c = this._contacts, core = this._core, island = this._island;
+    broad.update(this);
+    if (broad.movedCount > 0) broad.candidates(this, pairs);
     c.count = 0;
-    for (let a = 0; a < top; a++) {
-      if (state[a] !== 1 || core[a] === null) continue;
-      for (let b = a + 1; b < top; b++) {
-        if (state[b] !== 1 || core[b] === null || (type[a] !== DYNAMIC && type[b] !== DYNAMIC)) continue;
-        const dx = p[2 * b] - p[2 * a], dy = p[2 * b + 1] - p[2 * a + 1];
-        const far = reach[a] + reach[b] + motion[a] + motion[b] + Math.min(size[a], size[b]) * PIXEL;
-        if (dx * dx + dy * dy > far * far) continue;
-        const key = a * 16777216 + b;
-        meet(this, c, a, b, key, dt, this._memory.get(key));
+    // `active` may grow as this walks: a pair woken here is looked at this step.
+    for (let p = 0; p < pairs.active;) {
+      const a = pairs.a[p], b = pairs.b[p];
+      if (!broad.overlap(a, b)) { pairs.drop(p); continue; }
+      if (core[a] !== null && core[b] !== null) {
+        this._narrowed++;
+        if (meet(this, c, a, b, p, pairs)) {
+          // A sleeping body touched wakes, and its island's pairs join this walk.
+          if (island[a] !== 0) this._wake(a);
+          if (island[b] !== 0) this._wake(b);
+        } else {
+          pairs.ids[2 * p] = -1; pairs.ids[2 * p + 1] = -1; pairs.roll[p] = 0;
+        }
       }
+      p++;
     }
   }
 
-  /** What each pair pushed with, for the next step's warm start: see _narrow. */
-  _remember() {
-    const c = this._contacts, next = this._memoryNext;
-    next.clear();
-    for (let m = 0; m < c.count; m++) {
-      const m2 = 2 * m, two = c.points[m] === 2;
-      next.set(c.key[m], {
-        id0: c.id[m2], n0: c.normalImpulse[m2], t0: c.tangentImpulse[m2],
-        id1: two ? c.id[m2 + 1] : -1, n1: c.normalImpulse[m2 + 1], t1: c.tangentImpulse[m2 + 1],
-        roll: c.rollImpulse[m],
-      });
+  /**
+   * Who may sleep. An island, bodies touching, sleeps when every one of them
+   * has stayed within its tolerance of where it rested for SLEEP_TIME:
+   * distance, not speed, since a speed rule kept a buzzing heap awake for good
+   * (world.js). The rest pose is taken again each whole SLEEP_TIME, so a body
+   * creeping less than its tolerance a second is still. Islands are made by
+   * union-find over this step's contacts, only once someone is ready. Static
+   * bodies join nothing, or a whole floor would be one island.
+   */
+  _sleep(dt) {
+    const list = this._awakeList, p = this._position, r = this._rotation, rest = this._rest, reach = this._reach;
+    const size = this._size, still = this._still, calm = this._calm, shape = this._shape, parent = this._parent;
+    let ready = false;
+    for (let i = 0; i < this._awakeCount; i++) {
+      const s = list[i], s2 = 2 * s, s4 = 4 * s, tolerance = size[s] * PIXEL;
+      const dx = p[s2] - rest[s4], dy = p[s2 + 1] - rest[s4 + 1], dc = r[s2] - rest[s4 + 2], dz = r[s2 + 1] - rest[s4 + 3];
+      let far = dx * dx + dy * dy;
+      if (shape[s] !== CIRCLE) far += (dc * dc + dz * dz) * reach[s] * reach[s];
+      const again = far > tolerance * tolerance;
+      still[s] = again ? 0 : still[s] + dt;
+      if (again) calm[s] = 0;
+      else if (still[s] >= SLEEP_TIME) { calm[s] = 1; still[s] = 0; }
+      if (again || still[s] === 0) {
+        rest[s4] = p[s2]; rest[s4 + 1] = p[s2 + 1]; rest[s4 + 2] = r[s2]; rest[s4 + 3] = r[s2 + 1];
+      }
+      if (calm[s] === 1) ready = true;
+      parent[s] = s;
     }
-    this._memoryNext = this._memory;
-    this._memory = next;
+    if (!ready) return;
+    const find = (x) => {
+      while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+      return x;
+    };
+    const c = this._contacts, type = this._type;
+    for (let m = 0; m < c.count; m++) {
+      const a = c.a[m], b = c.b[m];
+      if (type[a] === DYNAMIC && type[b] === DYNAMIC) parent[find(a)] = find(b);
+    }
+    // An island with anyone not calm stays up. Every body points straight at
+    // its root first, so nothing below has to walk.
+    const blocked = this._blocked;
+    for (let i = 0; i < this._awakeCount; i++) {
+      const s = list[i], root = find(s);
+      parent[s] = root;
+      blocked[root] = 0;
+    }
+    for (let i = 0; i < this._awakeCount; i++) {
+      const s = list[i];
+      if (calm[s] === 0) blocked[parent[s]] = 1;
+    }
+    const isle = this._island, nextOf = this._islandNext, roots = new Map();
+    for (let i = 0; i < this._awakeCount; i++) {
+      const s = list[i], root = parent[s];
+      if (blocked[root] === 1) continue;
+      const head = roots.get(root);
+      nextOf[s] = head === undefined ? 0 : head + 1;
+      roots.set(root, s);
+    }
+    if (roots.size === 0) return;
+    const v = this._velocity, w = this._angular, pairs = this._pairs;
+    for (const head of roots.values()) {
+      for (let b = head; b >= 0; b = nextOf[b] - 1) {
+        isle[b] = head + 1;
+        v[2 * b] = 0; v[2 * b + 1] = 0; w[b] = 0;
+        this._unawaken(b);
+        this._note(b, this._stepCount);
+      }
+    }
+    // Pairs with no awake body left: at the end of the list, costing nothing.
+    for (let p2 = pairs.active - 1; p2 >= 0; p2--) {
+      const a = pairs.a[p2], b = pairs.b[p2];
+      if (this._inAwake[a] === 0 && this._inAwake[b] === 0) pairs.rest(p2);
+    }
   }
 
   _applyForces(dt) {
@@ -803,6 +1033,12 @@ const atLeastZero = (caller, name, value) => {
   return value;
 };
 
+/** 32 bits, given unsigned or signed: `~PLAYER` and `1 << 31` are negative (world.js bits). */
+const bits = (caller, name, value) => {
+  if (!Number.isInteger(value) || value < -0x80000000 || value > 0xffffffff) fail(caller, `${name} must be a whole number that fits in 32 bits, got ${show(value)}`);
+  return value >>> 0;
+};
+
 const flag = (caller, name, value) => {
   if (typeof value !== 'boolean') fail(caller, `${name} must be true or false, got ${show(value)}`);
   return value;
@@ -891,6 +1127,13 @@ function resolve(caller, base, given) {
   const damping = has('damping') ? atLeastZero(caller, 'damping', given.damping) : base.damping;
   const angularDamping = has('angularDamping') ? atLeastZero(caller, 'angularDamping', given.angularDamping) : base.angularDamping;
   const gravityScale = has('gravityScale') ? finite(caller, 'gravityScale', given.gravityScale) : base.gravityScale;
+  const layers = has('layers') ? bits(caller, 'layers', given.layers) : base.layers;
+  const mask = has('mask') ? bits(caller, 'mask', given.mask) : base.mask;
+  let group = base.group;
+  if (has('group')) {
+    group = given.group;
+    if (!Number.isSafeInteger(group) || group < 0) fail(caller, `group must be a whole number, 0 or more, got ${show(group)}`);
+  }
   const lockRotation = has('lockRotation') ? flag(caller, 'lockRotation', given.lockRotation) : base.lockRotation;
   let lockPosition = base.lockPosition;
   if (has('lockPosition')) {
@@ -910,7 +1153,7 @@ function resolve(caller, base, given) {
   const angularVelocity = has('angularVelocity') ? finite(caller, 'angularVelocity', given.angularVelocity) : base.angularVelocity;
   return {
     type, shape, size, radius, height, vertices, parts, density, mass, massGiven, inertia, inertiaGiven, centerOfMass,
-    friction, restitution, damping, angularDamping, gravityScale, lockRotation, lockPosition,
+    friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, lockRotation, lockPosition,
     position, angle, velocity, angularVelocity,
   };
 }

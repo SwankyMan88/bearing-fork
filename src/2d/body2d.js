@@ -29,6 +29,10 @@ export class Body2D {
   get alive() { return this.#world._alive(this.#id); }
   set alive(_) { readOnly('body.alive'); }
 
+  /** Whether it is asleep: left out of steps until something disturbs it. */
+  get asleep() { return this.#world._asleepOf('body.asleep', this.#id); }
+  set asleep(_) { readOnly('body.asleep'); }
+
   /** kg. */
   get mass() { return this.#world._massOf('body.mass', this.#id); }
   set mass(_) { readOnly('body.mass', 'setBody(body, { mass })'); }

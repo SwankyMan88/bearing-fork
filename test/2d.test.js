@@ -235,7 +235,7 @@ test('add, set, read and remove: bodyOf round-trips, ids stay dead, storage come
   const quiet = new World2D();
   for (let round = 0; round < 3; round++) {
     const bodies = [];
-    for (let k = 0; k < 2000; k++) bodies.push(quiet.addBody({ shape: 'circle', radius: 1 }));
+    for (let k = 0; k < 2000; k++) bodies.push(quiet.addBody({ shape: 'circle', radius: 1, position: [k * 5, 0], gravityScale: 0 }));
     quiet.step(DT);
     for (const b of bodies) b.destroy();
     assert.equal(quiet._slots.capacity, 0, 'storage back to nothing');
