@@ -265,6 +265,14 @@ export function joints(): void {
   const ground = flat.addBody({ shape: 'tilemap', tileSize: [16, 16], columns: 4, rows: 1, tiles: new Uint32Array(4) });
   flat.addBody({ shape: 'chain', vertices: [0, 0, 100, 0], layers: 2, mask: 3, group: 1 });
   flat.setTile(ground, 1, 0, flat.tileAt(ground, 0, 0) + 1);
+  const hit = flat.raycast([0, 0], [1, 0], { maxDistance: 10, ignore: [ground], mask: 1 });
+  const far2d: number = hit ? hit.distance + hit.point[0] + hit.normal[1] + hit.body.mass : 0;
+  flat.raycastAll([0, 0], [0, 1]);
+  flat.shapeCast({ shape: 'capsule', radius: 3, height: 18 }, [0, 5], [1, 0], { angle: 1 });
+  const near2d: Body2D[] = flat.overlap({ shape: 'circle', radius: 2 }, [0, 0], { ignore: ground });
+  for (const e of flat.contacts(ground)) if (e.type !== 'end') void (e.speed + e.point[0] + far2d);
+  flat.touching(near2d[0]);
+  flat.addBody({ sensor: true });
   const read: BodyInfo2D = flat.bodyOf(shard);
   const at: Vec2 = read.position;
   const [x, y] = shard.position;

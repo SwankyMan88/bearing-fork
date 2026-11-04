@@ -3,7 +3,7 @@
 `bearing-physics/2d` is Bearing for a flat world: the same calls, options and errors as
 [the 3D reference](API.md), in pixels. This page lists every call. It grows as the 2D module does:
 for now, boxes, circles, capsules, polygons and compounds collide, stack, roll and sleep, thousands
-at a time, on tilemaps and chains.
+at a time, on tilemaps and chains, with rays, shape casts, contact events and sensors.
 
 ```js
 import { World2D } from 'bearing-physics/2d';
@@ -30,7 +30,7 @@ Everything in [the 3D reference's conventions](API.md#conventions) holds. These 
 
 ## Contents
 
-[World2D](#world-class) · [Body2D](#body) · [Contacts](#contacts) · [Tilemaps and chains](#levels) · [Sleeping](#sleeping)
+[World2D](#world-class) · [Body2D](#body) · [Contacts](#contacts) · [Tilemaps and chains](#levels) · [Contact events and sensors](#events) · [Sleeping](#sleeping)
 
 ## Index
 
@@ -38,7 +38,7 @@ Everything in [the 3D reference's conventions](API.md#conventions) holds. These 
 
 **B** &nbsp; [Body2D](#body) · [`world.body()`](#world-body) · [`world.bodyCount`](#world-bodycount) · [`world.bodyOf()`](#world-bodyof)
 
-**C** &nbsp; [Contacts](#contacts)
+**C** &nbsp; [Contact events and sensors](#events) · [Contacts](#contacts) · [`world.contacts()`](#world-contacts)
 
 **D** &nbsp; [`body.destroy()`](#body-destroy) · [`world.destroy()`](#world-destroy)
 
@@ -48,13 +48,15 @@ Everything in [the 3D reference's conventions](API.md#conventions) holds. These 
 
 **M** &nbsp; [`body.mass`](#body-mass) · [`world.moved()`](#world-moved) · [`body.moveTo()`](#body-moveto)
 
+**O** &nbsp; [`world.overlap()`](#world-overlap)
+
 **P** &nbsp; [`body.position`](#body-position) · [`world.previous`](#world-previous)
 
-**R** &nbsp; [`world.remove()`](#world-remove)
+**R** &nbsp; [`world.raycast()`](#world-raycast) · [`world.raycastAll()`](#world-raycastall) · [`world.remove()`](#world-remove)
 
-**S** &nbsp; [`body.setAngle()`](#body-setangle) · [`body.setAngularVelocity()`](#body-setangularvelocity) · [`world.setBody()`](#world-setbody) · [`body.setPosition()`](#body-setposition) · [`body.setVelocity()`](#body-setvelocity) · [`world.sleeping`](#world-sleeping) · [Sleeping](#sleeping) · [`body.slot`](#body-slot) · [`world.step()`](#world-step) · [`world.stepCount`](#world-stepcount) · [`world.setTile()`](#world-settile) · [`world.substeps`](#world-substeps)
+**S** &nbsp; [`body.setAngle()`](#body-setangle) · [`body.setAngularVelocity()`](#body-setangularvelocity) · [`world.setBody()`](#world-setbody) · [`body.setPosition()`](#body-setposition) · [`body.setVelocity()`](#body-setvelocity) · [`world.shapeCast()`](#world-shapecast) · [`world.sleeping`](#world-sleeping) · [Sleeping](#sleeping) · [`body.slot`](#body-slot) · [`world.step()`](#world-step) · [`world.stepCount`](#world-stepcount) · [`world.setTile()`](#world-settile) · [`world.substeps`](#world-substeps)
 
-**T** &nbsp; [`world.tileAt()`](#world-tileat) · [Tilemaps and chains](#levels) · [`world.transforms`](#world-transforms)
+**T** &nbsp; [`world.touching()`](#world-touching) · [`world.tileAt()`](#world-tileat) · [Tilemaps and chains](#levels) · [`world.transforms`](#world-transforms)
 
 **V** &nbsp; [`body.velocity`](#body-velocity)
 
@@ -215,6 +217,7 @@ Adds a body. Every option has a default, so `addBody()` is a 100 px box, 1 m at 
 | `layers` | `1` | Which of 32 layers it is in, one bit each. Two bodies collide when each one's layers are in the other's `mask`, as in [3D](API.md#layers). |
 | `mask` | `0xffffffff` | Which layers it collides with, one bit each: all of them. |
 | `group` | `0` (none) | Bodies of the same group never collide with each other, whatever their layers: any whole number, so a body's `id` will do. |
+| `sensor` | `false` | Reports what overlaps it and pushes nothing. See [Contact events and sensors](#events). |
 | `lockRotation` | `false` | Whether it never turns. |
 | `lockPosition` | `[false, false]` | The axes its centre of mass never moves along, x and y. |
 | `position` | `[0, 0]` | Its origin, px. |
@@ -224,7 +227,7 @@ Adds a body. Every option has a default, so `addBody()` is a 100 px box, 1 m at 
 
 Returns: a [`Body2D`](#body).
 
-Throws: `addBody: this world was destroyed`; `addBody: options must be an object, got …`; `addBody: unknown option '…' (did you mean '…'?)`; `addBody: unknown option '…' (the options are type, shape, size, radius, height, vertices, parts, tileSize, columns, rows, tiles, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, lockRotation, lockPosition, position, angle, velocity, angularVelocity)`; `addBody: type must be 'dynamic', 'static' or 'kinematic', got …`; `addBody: shape must be 'box', 'circle', 'capsule', 'polygon', 'compound', 'tilemap' or 'chain', got …`; `addBody: a <shape> has no <option>`; `addBody: size must be 2 positive numbers, got …`; `addBody: radius must be a positive number, got …`; `addBody: height must be a positive number, got …`; `addBody: height must be at least twice radius (…), got …`; `addBody: vertices must be finite numbers, two to a vertex, got …`; `addBody: vertices must span an area (3 points not on one line), got …`; `addBody: vertices must be 2 or more points, finite numbers, two to a point, got …`; `addBody: vertices must not repeat a point, got …`; `addBody: tileSize must be 2 positive numbers, got …`; `addBody: columns must be a whole number, 1 or more, got …`; `addBody: rows must be a whole number, 1 or more, got …`; `addBody: tiles must be whole numbers that fit in 32 bits, got …`; `addBody: tiles holds … ids; a … x … map needs …`; `addBody: type must be 'static' for a <shape>, got …`; `addBody: parts must be a list of one or more parts, got …`; `addBody: parts[…] must be an object, got …`; `addBody: parts[…]: unknown option '…' (did you mean '…'?)`; `addBody: parts[…]: unknown option '…' (the options are shape, size, radius, height, vertices, position, angle, density)`; `addBody: parts[…].shape must be 'box', 'circle', 'capsule' or 'polygon', got …`; `addBody: parts[…]: a <shape> has no <option>`; `addBody: parts[…].size must be 2 positive numbers, got …`; `addBody: parts[…].radius must be a positive number, got …`; `addBody: parts[…].height must be a positive number, got …`; `addBody: parts[…].height must be at least twice radius (…), got …`; `addBody: parts[…].vertices must be finite numbers, two to a vertex, got …`; `addBody: parts[…].vertices must span an area (3 points not on one line), got …`; `addBody: parts[…].position must be 2 finite numbers, got …`; `addBody: parts[…].angle must be a finite number, got …`; `addBody: parts[…].density must be a positive number, got …`; `addBody: give mass or density, not both`; `addBody: mass must be a positive number, got …`; `addBody: density must be a positive number, got …`; `addBody: inertia must be a positive number, or null to follow the shape, got …`; `addBody: centerOfMass must be 2 finite numbers, got …`; `addBody: friction must be 0 or more, got …`; `addBody: restitution must be from 0 to 1, got …`; `addBody: damping must be 0 or more, got …`; `addBody: angularDamping must be 0 or more, got …`; `addBody: gravityScale must be a finite number, got …`; `addBody: layers must be a whole number that fits in 32 bits, got …`; `addBody: mask must be a whole number that fits in 32 bits, got …`; `addBody: group must be a whole number, 0 or more, got …`; `addBody: lockRotation must be true or false, got …`; `addBody: lockPosition must be 2 true or false values, got …`; `addBody: position must be 2 finite numbers, got …`; `addBody: angle must be a finite number, got …`; `addBody: a static body has no velocity`; `addBody: a static body has no angularVelocity`; `addBody: velocity must be 2 finite numbers, got …`; `addBody: angularVelocity must be a finite number, got …`; `addBody: a world holds at most 16777216 bodies (the slot field of an id is 24 bits)`.
+Throws: `addBody: this world was destroyed`; `addBody: options must be an object, got …`; `addBody: unknown option '…' (did you mean '…'?)`; `addBody: unknown option '…' (the options are type, shape, size, radius, height, vertices, parts, tileSize, columns, rows, tiles, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, sensor, lockRotation, lockPosition, position, angle, velocity, angularVelocity)`; `addBody: type must be 'dynamic', 'static' or 'kinematic', got …`; `addBody: shape must be 'box', 'circle', 'capsule', 'polygon', 'compound', 'tilemap' or 'chain', got …`; `addBody: a <shape> has no <option>`; `addBody: size must be 2 positive numbers, got …`; `addBody: radius must be a positive number, got …`; `addBody: height must be a positive number, got …`; `addBody: height must be at least twice radius (…), got …`; `addBody: vertices must be finite numbers, two to a vertex, got …`; `addBody: vertices must span an area (3 points not on one line), got …`; `addBody: vertices must be 2 or more points, finite numbers, two to a point, got …`; `addBody: vertices must not repeat a point, got …`; `addBody: tileSize must be 2 positive numbers, got …`; `addBody: columns must be a whole number, 1 or more, got …`; `addBody: rows must be a whole number, 1 or more, got …`; `addBody: tiles must be whole numbers that fit in 32 bits, got …`; `addBody: tiles holds … ids; a … x … map needs …`; `addBody: type must be 'static' for a <shape>, got …`; `addBody: parts must be a list of one or more parts, got …`; `addBody: parts[…] must be an object, got …`; `addBody: parts[…]: unknown option '…' (did you mean '…'?)`; `addBody: parts[…]: unknown option '…' (the options are shape, size, radius, height, vertices, position, angle, density)`; `addBody: parts[…].shape must be 'box', 'circle', 'capsule' or 'polygon', got …`; `addBody: parts[…]: a <shape> has no <option>`; `addBody: parts[…].size must be 2 positive numbers, got …`; `addBody: parts[…].radius must be a positive number, got …`; `addBody: parts[…].height must be a positive number, got …`; `addBody: parts[…].height must be at least twice radius (…), got …`; `addBody: parts[…].vertices must be finite numbers, two to a vertex, got …`; `addBody: parts[…].vertices must span an area (3 points not on one line), got …`; `addBody: parts[…].position must be 2 finite numbers, got …`; `addBody: parts[…].angle must be a finite number, got …`; `addBody: parts[…].density must be a positive number, got …`; `addBody: give mass or density, not both`; `addBody: mass must be a positive number, got …`; `addBody: density must be a positive number, got …`; `addBody: inertia must be a positive number, or null to follow the shape, got …`; `addBody: centerOfMass must be 2 finite numbers, got …`; `addBody: friction must be 0 or more, got …`; `addBody: restitution must be from 0 to 1, got …`; `addBody: damping must be 0 or more, got …`; `addBody: angularDamping must be 0 or more, got …`; `addBody: gravityScale must be a finite number, got …`; `addBody: layers must be a whole number that fits in 32 bits, got …`; `addBody: mask must be a whole number that fits in 32 bits, got …`; `addBody: group must be a whole number, 0 or more, got …`; `addBody: sensor must be true or false, got …`; `addBody: lockRotation must be true or false, got …`; `addBody: lockPosition must be 2 true or false values, got …`; `addBody: position must be 2 finite numbers, got …`; `addBody: angle must be a finite number, got …`; `addBody: a static body has no velocity`; `addBody: a static body has no angularVelocity`; `addBody: velocity must be 2 finite numbers, got …`; `addBody: angularVelocity must be a finite number, got …`; `addBody: a world holds at most 16777216 bodies (the slot field of an id is 24 bits)`.
 
 ```js
 const shard = world.addBody({ shape: 'polygon', vertices: [0, 0, 6, 1, 4, 5], position: [320, 96], angle: 0.3 });
@@ -236,6 +239,120 @@ const ell = world.addBody({ shape: 'compound', parts: [
 
 Notes: a compound's `position` is its origin, not its centre of mass, which Bearing works out from
 its parts.
+
+<a id="world-raycast"></a>
+### `world.raycast(origin, direction, options)` → `{ body, point, normal, distance } | null`
+
+The nearest body the ray from `origin` along `direction` meets, or `null`. `direction` needn't be
+unit length; `distance` is px along it. Every shape can be hit, sleeping bodies too, and a chain from
+either side. A ray that starts inside something hits it at 0, with `normal` back along the ray.
+Sensors are passed through.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `maxDistance` | `Infinity` | Ignore hits this far or further, px. |
+| `mask` | `0xffffffff` | Which of the 32 layers to hit, as bits: a body is hit if any of its `layers` is in it. |
+| `ignore` | `null` | A body to leave out, or a list of them, such as a ragdoll's own parts. |
+
+Returns: `{ body, point, normal, distance }`, or `null` for a miss.
+
+Throws: `raycast: this world was destroyed`; `raycast: origin must be 2 finite numbers, got …`; `raycast: direction must be 2 finite numbers, not both zero, got …`; `raycast: options must be an object, got …`; `raycast: unknown option '…' (did you mean '…'?)`; `raycast: unknown option '…' (the options are maxDistance, mask, ignore)`; `raycast: maxDistance must be 0 or more, got …`; `raycast: mask must be a whole number that fits in 32 bits, got …`; `raycast: ignore must be a Body2D or a list of Body2Ds, got …`; `raycast: ignore belongs to another world`; `raycast: ignore was removed`; `raycast: ignore[…] must be a Body2D, got …`; `raycast: ignore[…] belongs to another world`; `raycast: ignore[…] was removed`.
+
+```js
+const below = world.raycast(ball.position, [0, 1], { maxDistance: 400, ignore: ball });
+if (below) console.log(below.distance, below.normal);
+```
+
+<a id="world-raycastall"></a>
+### `world.raycastAll(origin, direction, options)` → `Array`
+
+Every body the ray meets, nearest first, each once. Takes `raycast`'s options.
+
+Returns: an array of `{ body, point, normal, distance }`; `[]` for none.
+
+Throws: `raycastAll: this world was destroyed`; `raycastAll: origin must be 2 finite numbers, got …`; `raycastAll: direction must be 2 finite numbers, not both zero, got …`; `raycastAll: options must be an object, got …`; `raycastAll: unknown option '…' (did you mean '…'?)`; `raycastAll: unknown option '…' (the options are maxDistance, mask, ignore)`; `raycastAll: maxDistance must be 0 or more, got …`; `raycastAll: mask must be a whole number that fits in 32 bits, got …`; `raycastAll: ignore must be a Body2D or a list of Body2Ds, got …`; `raycastAll: ignore belongs to another world`; `raycastAll: ignore was removed`; `raycastAll: ignore[…] must be a Body2D, got …`; `raycastAll: ignore[…] belongs to another world`; `raycastAll: ignore[…] was removed`.
+
+```js
+for (const hit of world.raycastAll([0, 0], [1, 0])) console.log(hit.body.id);
+```
+
+<a id="world-shapecast"></a>
+### `world.shapeCast(shape, origin, direction, options)` → `{ body, point, normal, distance } | null`
+
+The first body `shape`, moving from `origin` along `direction`, would touch, or `null`. `shape` is
+`{ shape, size, radius, height }`, addBody's names and defaults: `{}` is a 100 px box. `normal`
+points from the surface back at the shape. It takes `raycast`'s options, and `angle`, how the shape
+is turned.
+
+Returns: `{ body, point, normal, distance }`, or `null`.
+
+Throws: `shapeCast: this world was destroyed`; `shapeCast: shape must be an object, got …`; `shapeCast: shape: unknown option '…' (did you mean '…'?)`; `shapeCast: shape: unknown option '…' (the options are shape, size, radius, height)`; `shapeCast: shape.shape must be 'box', 'circle' or 'capsule', got …`; `shapeCast: shape: a <shape> has no <option>`; `shapeCast: shape.size must be 2 positive numbers, got …`; `shapeCast: shape.radius must be a positive number, got …`; `shapeCast: shape.height must be a positive number, got …`; `shapeCast: shape.height must be at least twice radius (…), got …`; `shapeCast: origin must be 2 finite numbers, got …`; `shapeCast: direction must be 2 finite numbers, not both zero, got …`; `shapeCast: options must be an object, got …`; `shapeCast: unknown option '…' (did you mean '…'?)`; `shapeCast: unknown option '…' (the options are maxDistance, mask, ignore, angle)`; `shapeCast: maxDistance must be 0 or more, got …`; `shapeCast: mask must be a whole number that fits in 32 bits, got …`; `shapeCast: ignore must be a Body2D or a list of Body2Ds, got …`; `shapeCast: ignore belongs to another world`; `shapeCast: ignore was removed`; `shapeCast: ignore[…] must be a Body2D, got …`; `shapeCast: ignore[…] belongs to another world`; `shapeCast: ignore[…] was removed`; `shapeCast: angle must be a finite number, got …`.
+
+```js
+const hit = world.shapeCast({ size: [20, 40] }, [0, 0], [1, 0], { maxDistance: 300 });
+```
+
+Notes: it stops within a tolerance short of touching. A shape already touching and moving away
+isn't stopped.
+
+<a id="world-overlap"></a>
+### `world.overlap(shape, position, options)` → `Array`
+
+The bodies `shape`, placed at `position`, overlaps or touches. Sensors are left out.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `mask` | `0xffffffff` | Which of the 32 layers to find, as bits. |
+| `ignore` | `null` | A body to leave out, or a list of them. |
+| `angle` | `0` | How the shape is turned. |
+
+Returns: an array of [`Body2D`](#body); `[]` for none.
+
+Throws: `overlap: this world was destroyed`; `overlap: shape must be an object, got …`; `overlap: shape: unknown option '…' (did you mean '…'?)`; `overlap: shape: unknown option '…' (the options are shape, size, radius, height)`; `overlap: shape.shape must be 'box', 'circle' or 'capsule', got …`; `overlap: shape: a <shape> has no <option>`; `overlap: shape.size must be 2 positive numbers, got …`; `overlap: shape.radius must be a positive number, got …`; `overlap: shape.height must be a positive number, got …`; `overlap: shape.height must be at least twice radius (…), got …`; `overlap: position must be 2 finite numbers, got …`; `overlap: options must be an object, got …`; `overlap: unknown option '…' (did you mean '…'?)`; `overlap: unknown option '…' (the options are mask, ignore, angle)`; `overlap: mask must be a whole number that fits in 32 bits, got …`; `overlap: ignore must be a Body2D or a list of Body2Ds, got …`; `overlap: ignore belongs to another world`; `overlap: ignore was removed`; `overlap: ignore[…] must be a Body2D, got …`; `overlap: ignore[…] belongs to another world`; `overlap: ignore[…] was removed`; `overlap: angle must be a finite number, got …`.
+
+```js
+const blast = [200, 50];
+for (const body of world.overlap({ shape: 'circle', radius: 80 }, blast)) body.applyImpulse([0, -5000]);
+```
+
+<a id="world-contacts"></a>
+### `world.contacts(body?)` → `Array`
+
+The last step's contact events: which pairs began touching, which met again while touching, and
+which stopped. Read it after each step. Given a body, only that body's events, each turned so that
+`a` is that body. See [Contact events and sensors](#events).
+
+Returns: fresh plain objects, in the same order every run. A begin is
+`{ type: 'begin', a, b, point, normal, speed }`: `point` is where they met, `normal` the unit
+direction from `a` to `b`, `speed` how fast they closed along it, px/s. An impact,
+`{ type: 'impact', a, b, point, normal, speed }`, has a begin's fields. An end is
+`{ type: 'end', a, b }`.
+
+Throws: `contacts: this world was destroyed`; `contacts: body must be a Body2D, got …`; `contacts: body belongs to another world`.
+
+```js
+world.step(1 / 60);
+for (const e of world.contacts()) {
+  if (e.type !== 'end' && e.speed > 200) console.log('thud', e.point, e.speed);
+}
+```
+
+Notes: a removed body can still be asked about: its events come with the step after its removal,
+its handle reading `alive` as `false`.
+
+<a id="world-touching"></a>
+### `world.touching(body)` → `Array`
+
+Every body touching this one as of the last step, or overlapping it where either is a sensor. It
+costs what the body is near, and a sleeping body's touches are kept.
+
+Returns: an array of [`Body2D`](#body); `[]` if none.
+
+Throws: `touching: this world was destroyed`; `touching: body must be a Body2D, got …`; `touching: body belongs to another world`; `touching: body was removed`.
+
+```js
+const inside = world.touching(crate).map((b) => b.id);
+```
 
 <a id="world-settile"></a>
 ### `world.setTile(body, x, y, id)`
@@ -269,7 +386,7 @@ console.log(world.tileAt(map, 3, 0));
 Changes any of the options `addBody` took, and leaves the rest. Mass and inertia follow a new
 shape, unless given.
 
-Throws: `setBody: this world was destroyed`; `setBody: body must be a Body2D, got …`; `setBody: body belongs to another world`; `setBody: body was removed`; `setBody: changes must be an object, got …`; `setBody: unknown option '…' (did you mean '…'?)`; `setBody: unknown option '…' (the options are type, shape, size, radius, height, vertices, parts, tileSize, columns, rows, tiles, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, lockRotation, lockPosition, position, angle, velocity, angularVelocity)`; `setBody: type must be 'dynamic', 'static' or 'kinematic', got …`; `setBody: shape must be 'box', 'circle', 'capsule', 'polygon', 'compound', 'tilemap' or 'chain', got …`; `setBody: a <shape> has no <option>`; `setBody: size must be 2 positive numbers, got …`; `setBody: radius must be a positive number, got …`; `setBody: height must be a positive number, got …`; `setBody: height must be at least twice radius (…), got …`; `setBody: vertices must be finite numbers, two to a vertex, got …`; `setBody: vertices must span an area (3 points not on one line), got …`; `setBody: vertices must be 2 or more points, finite numbers, two to a point, got …`; `setBody: vertices must not repeat a point, got …`; `setBody: tileSize must be 2 positive numbers, got …`; `setBody: columns must be a whole number, 1 or more, got …`; `setBody: rows must be a whole number, 1 or more, got …`; `setBody: tiles must be whole numbers that fit in 32 bits, got …`; `setBody: tiles holds … ids; a … x … map needs …`; `setBody: type must be 'static' for a <shape>, got …`; `setBody: parts must be a list of one or more parts, got …`; `setBody: give mass or density, not both`; `setBody: mass must be a positive number, got …`; `setBody: density must be a positive number, got …`; `setBody: inertia must be a positive number, or null to follow the shape, got …`; `setBody: centerOfMass must be 2 finite numbers, got …`; `setBody: friction must be 0 or more, got …`; `setBody: restitution must be from 0 to 1, got …`; `setBody: damping must be 0 or more, got …`; `setBody: angularDamping must be 0 or more, got …`; `setBody: gravityScale must be a finite number, got …`; `setBody: layers must be a whole number that fits in 32 bits, got …`; `setBody: mask must be a whole number that fits in 32 bits, got …`; `setBody: group must be a whole number, 0 or more, got …`; `setBody: lockRotation must be true or false, got …`; `setBody: lockPosition must be 2 true or false values, got …`; `setBody: position must be 2 finite numbers, got …`; `setBody: angle must be a finite number, got …`; `setBody: a static body has no velocity`; `setBody: a static body has no angularVelocity`; `setBody: velocity must be 2 finite numbers, got …`; `setBody: angularVelocity must be a finite number, got …`.
+Throws: `setBody: this world was destroyed`; `setBody: body must be a Body2D, got …`; `setBody: body belongs to another world`; `setBody: body was removed`; `setBody: changes must be an object, got …`; `setBody: unknown option '…' (did you mean '…'?)`; `setBody: unknown option '…' (the options are type, shape, size, radius, height, vertices, parts, tileSize, columns, rows, tiles, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, sensor, lockRotation, lockPosition, position, angle, velocity, angularVelocity)`; `setBody: type must be 'dynamic', 'static' or 'kinematic', got …`; `setBody: shape must be 'box', 'circle', 'capsule', 'polygon', 'compound', 'tilemap' or 'chain', got …`; `setBody: a <shape> has no <option>`; `setBody: size must be 2 positive numbers, got …`; `setBody: radius must be a positive number, got …`; `setBody: height must be a positive number, got …`; `setBody: height must be at least twice radius (…), got …`; `setBody: vertices must be finite numbers, two to a vertex, got …`; `setBody: vertices must span an area (3 points not on one line), got …`; `setBody: vertices must be 2 or more points, finite numbers, two to a point, got …`; `setBody: vertices must not repeat a point, got …`; `setBody: tileSize must be 2 positive numbers, got …`; `setBody: columns must be a whole number, 1 or more, got …`; `setBody: rows must be a whole number, 1 or more, got …`; `setBody: tiles must be whole numbers that fit in 32 bits, got …`; `setBody: tiles holds … ids; a … x … map needs …`; `setBody: type must be 'static' for a <shape>, got …`; `setBody: parts must be a list of one or more parts, got …`; `setBody: give mass or density, not both`; `setBody: mass must be a positive number, got …`; `setBody: density must be a positive number, got …`; `setBody: inertia must be a positive number, or null to follow the shape, got …`; `setBody: centerOfMass must be 2 finite numbers, got …`; `setBody: friction must be 0 or more, got …`; `setBody: restitution must be from 0 to 1, got …`; `setBody: damping must be 0 or more, got …`; `setBody: angularDamping must be 0 or more, got …`; `setBody: gravityScale must be a finite number, got …`; `setBody: layers must be a whole number that fits in 32 bits, got …`; `setBody: mask must be a whole number that fits in 32 bits, got …`; `setBody: group must be a whole number, 0 or more, got …`; `setBody: sensor must be true or false, got …`; `setBody: lockRotation must be true or false, got …`; `setBody: lockPosition must be 2 true or false values, got …`; `setBody: position must be 2 finite numbers, got …`; `setBody: angle must be a finite number, got …`; `setBody: a static body has no velocity`; `setBody: a static body has no angularVelocity`; `setBody: velocity must be 2 finite numbers, got …`; `setBody: angularVelocity must be a finite number, got …`.
 
 ```js
 world.setBody(ball, { shape: 'circle', radius: 16, type: 'static' });
@@ -281,7 +398,7 @@ world.setBody(ball, { shape: 'circle', radius: 16, type: 'static' });
 A copy of the body's options as they are now, in the form `addBody` takes, so
 `world.addBody(world.bodyOf(body))` makes a copy of it.
 
-Returns: `{ type, shape, …sizes, mass or density, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, lockRotation, lockPosition, position, angle, velocity, angularVelocity }`.
+Returns: `{ type, shape, …sizes, mass or density, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, sensor, lockRotation, lockPosition, position, angle, velocity, angularVelocity }`.
 `vertices` are a polygon's convex hull, `inertia` and `centerOfMass` `null` while they follow the
 shape, and a static body has no velocities.
 
@@ -670,6 +787,27 @@ world.addBody({ shape: 'chain', vertices: [-300, -100, 0, 0, 300, -100] });   //
 **Concave shapes** are compounds. A shape cut from pixels is rows of boxes merged where they can
 be: `{ shape: 'compound', parts: [...] }`. Each part costs a pair of its own near anything it
 touches, so fewer rectangles run faster.
+
+<a id="events"></a>
+## Contact events and sensors
+
+After each step, [`world.contacts()`](#world-contacts) lists what began touching, what met again,
+and what stopped, and [`world.touching()`](#world-touching) says what touches a body now. They work
+as in [3D](API.md#events): read after the step, never called back, so a body can be removed on the
+spot.
+
+- **A pair is one pair however it touches.** A body against a tilemap or chain begins once, and
+  ends once, whatever lines it crosses.
+- **An impact is touching, and hit again:** a box on a tilemap sliding into a wall of the same map,
+  or a body struck down onto the one it rests on. It comes when the pair's fastest pushed point
+  closes faster than last step by more than a bounce too small to see, √(2 g tolerance). A rise,
+  not a speed, so pressing gives none. So one check, `e.type !== 'end'`, reads every hit.
+- **Nothing changing writes nothing:** there are no stay events, so a resting pile costs none.
+
+**Sensors.** Any body is a sensor with `sensor: true`. It pushes nothing and nothing pushes it, and
+bodies pass through on exactly the same path. It sees every body but other sensors, by layers and
+masks, sleeping ones too, and wakes nothing. Queries pass through it. It looks where a step leaves
+bodies, so one that crosses it entirely within a step isn't seen.
 
 <a id="sleeping"></a>
 ## Sleeping

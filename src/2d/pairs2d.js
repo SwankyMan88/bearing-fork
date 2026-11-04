@@ -37,7 +37,7 @@ export class Pairs2D {
     this.count = 0;
     this.active = 0;
     this.capacity = 0;
-    this.a = null; this.b = null; this.touching = null;
+    this.a = null; this.b = null; this.touching = null; this.closing = null;
     // What it pushed with last, by point name: -1 for no point.
     this.ids = null; this.normal = null; this.tangent = null; this.roll = null;
     // A pair of many rows (a level, a compound) keeps key, normal, tangent to a point.
@@ -51,7 +51,7 @@ export class Pairs2D {
 
   _alloc(c) {
     const grow = (name, Type, n) => { this[name] = this[name] ? resized(this[name], n) : new Type(n); };
-    grow('a', Int32Array, c); grow('b', Int32Array, c); grow('touching', Uint8Array, c);
+    grow('a', Int32Array, c); grow('b', Int32Array, c); grow('touching', Uint8Array, c); grow('closing', Float64Array, c);
     grow('ids', Int32Array, 2 * c); grow('normal', Float64Array, 2 * c); grow('tangent', Float64Array, 2 * c);
     grow('roll', Float64Array, c); grow('extraCount', Int32Array, c); grow('next', Int32Array, 2 * c); grow('previous', Int32Array, 2 * c);
     this.capacity = c;
@@ -95,7 +95,7 @@ export class Pairs2D {
     let p = this.count++;
     if (this.active < p) { this._move(this.active, p); p = this.active; }
     this.active++;
-    this.a[p] = a; this.b[p] = b; this.touching[p] = 0; this.roll[p] = 0; this.extraCount[p] = 0;
+    this.a[p] = a; this.b[p] = b; this.touching[p] = 0; this.closing[p] = 0; this.roll[p] = 0; this.extraCount[p] = 0;
     const p2 = 2 * p;
     this.ids[p2] = NONE; this.ids[p2 + 1] = NONE;
     this.normal[p2] = 0; this.normal[p2 + 1] = 0; this.tangent[p2] = 0; this.tangent[p2 + 1] = 0;
@@ -118,7 +118,7 @@ export class Pairs2D {
   /** Copies row `from` over row `to`, carrying its links; `to` must be unlinked or dead. */
   _move(from, to) {
     this.a[to] = this.a[from]; this.b[to] = this.b[from]; this.touching[to] = this.touching[from]; this.roll[to] = this.roll[from];
-    this.extraCount[to] = this.extraCount[from];
+    this.extraCount[to] = this.extraCount[from]; this.closing[to] = this.closing[from];
     const held = this.extra[to];
     this.extra[to] = this.extra[from];
     this.extra[from] = held;
@@ -279,9 +279,18 @@ function meetLeaf(other) {
   list.add(self < other ? self : other, self < other ? other : self);
 }
 
-/** Whether two slots are ever paired: one dynamic, each in the other's mask, not of one group. */
+/**
+ * Whether two slots are ever paired: one dynamic, each in the other's mask, not
+ * of one group. A sensor sees anything but a sensor, kinematic bodies too, so a
+ * zone sees a platform pass, but never two static (as in 3D, pairs.js).
+ */
 export function pairable(w, a, b) {
-  if (w._type[a] !== DYNAMIC && w._type[b] !== DYNAMIC) return false;
+  const sa = w._sensor[a], sb = w._sensor[b];
+  if (sa === 0 && sb === 0) {
+    if (w._type[a] !== DYNAMIC && w._type[b] !== DYNAMIC) return false;
+  } else if ((sa === 1 && sb === 1) || (w._type[a] === STATIC && w._type[b] === STATIC)) {
+    return false;
+  }
   if ((w._layers[a] & w._mask[b]) === 0 || (w._layers[b] & w._mask[a]) === 0) return false;
   const g = w._group[a];
   return g === 0 || g !== w._group[b];

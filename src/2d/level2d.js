@@ -69,7 +69,7 @@ const found = new Manifold2();
 function line(core, bx, by, c, s, x1, y1, x2, y2, fx, fy, margin, tolerance, key, emit) {
   if (collideSide(core, bx, by, c, s, x1, y1, x2, y2, margin, tolerance, found) === 0) return;
   // From the body to the line: it must come at the open side.
-  if (found.nx * fx + found.ny * fy >= 0 && fromFront(margin, found) === 0) return;
+  if (found.nx * fx + found.ny * fy >= 0 && fromFront(margin, 2 * core.reach, found) === 0) return;
   emit(found, key);
 }
 
@@ -126,7 +126,7 @@ export function touchChain(chain, ox, oy, core, bx, by, c, s, px, py, reach, mar
     if (Math.min(x1, x2) > px + reach || Math.max(x1, x2) < px - reach || Math.min(y1, y2) > py + reach || Math.max(y1, y2) < py - reach) continue;
     if (collideSide(core, bx, by, c, s, x1, y1, x2, y2, margin, tolerance, found) === 0) continue;
     const fx = chain.nx[k], fy = chain.ny[k];
-    if (found.nx * fx + found.ny * fy >= 0 && fromFront(margin, found) === 0) continue;
+    if (found.nx * fx + found.ny * fy >= 0 && fromFront(margin, 2 * core.reach, found) === 0) continue;
     // Off the line's own normal, at one of its ends: met at a joint, however
     // the point is named (a box's front corner reaching a joint names itself).
     // Off by more than a tilt that moves a point a tolerance across the body:

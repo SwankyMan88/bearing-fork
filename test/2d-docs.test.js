@@ -75,7 +75,7 @@ const fresh = () => { const world = new World2D(); return { world, body: world.a
 const dead = () => { const f = fresh(); f.world.remove(f.body); return f; };
 const gone = () => { const f = fresh(); f.world.destroy(); return f; };
 
-const OPTIONS = 'type, shape, size, radius, height, vertices, parts, tileSize, columns, rows, tiles, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, lockRotation, lockPosition, position, angle, velocity, angularVelocity';
+const OPTIONS = 'type, shape, size, radius, height, vertices, parts, tileSize, columns, rows, tiles, density, mass, inertia, centerOfMass, friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, sensor, lockRotation, lockPosition, position, angle, velocity, angularVelocity';
 
 const bodyCases = (call, run) => {
   const e = `world-${call.toLowerCase()}`;
@@ -114,6 +114,7 @@ const bodyCases = (call, run) => {
     [e, run({ layers: 0.5 }), `${call}: layers must be a whole number that fits in 32 bits, got 0.5`],
     [e, run({ mask: 2 ** 32 }), `${call}: mask must be a whole number that fits in 32 bits, got 4294967296`],
     [e, run({ group: -1 }), `${call}: group must be a whole number, 0 or more, got -1`],
+    [e, run({ sensor: 1 }), `${call}: sensor must be true or false, got 1`],
     [e, run({ lockRotation: 1 }), `${call}: lockRotation must be true or false, got 1`],
     [e, run({ lockPosition: [true] }), `${call}: lockPosition must be 2 true or false values, got true`],
     [e, run({ position: [0, NaN] }), `${call}: position must be 2 finite numbers, got 0,NaN`],
@@ -175,6 +176,63 @@ const CASES = [
     ];
   }),
   ['world-settile', () => { const { world } = fresh(); world.setTile(world.addBody({ shape: 'tilemap' }), 0, 0, -1); }, 'setTile: id must be a whole number that fits in 32 bits, got -1'],
+  ...['raycast', 'raycastAll'].flatMap((call) => {
+    const e = `world-${call.toLowerCase()}`, run = (...args) => () => fresh().world[call](...args);
+    return [
+      [e, () => gone().world[call]([0, 0], [1, 0]), `${call}: this world was destroyed`],
+      [e, run([0], [1, 0]), `${call}: origin must be 2 finite numbers, got 0`],
+      [e, run([0, 0], [0, 0]), `${call}: direction must be 2 finite numbers, not both zero, got 0,0`],
+      [e, run([0, 0], [1, 0], 3), `${call}: options must be an object, got 3`],
+      [e, run([0, 0], [1, 0], { maxDistanse: 1 }), `${call}: unknown option 'maxDistanse' (did you mean 'maxDistance'?)`],
+      [e, run([0, 0], [1, 0], { banana: 1 }), `${call}: unknown option 'banana' (the options are maxDistance, mask, ignore)`],
+      [e, run([0, 0], [1, 0], { maxDistance: -1 }), `${call}: maxDistance must be 0 or more, got -1`],
+      [e, run([0, 0], [1, 0], { mask: 1.5 }), `${call}: mask must be a whole number that fits in 32 bits, got 1.5`],
+      [e, run([0, 0], [1, 0], { ignore: 7 }), `${call}: ignore must be a Body2D or a list of Body2Ds, got 7`],
+      [e, () => fresh().world[call]([0, 0], [1, 0], { ignore: fresh().body }), `${call}: ignore belongs to another world`],
+      [e, () => { const { world, body } = dead(); world[call]([0, 0], [1, 0], { ignore: body }); }, `${call}: ignore was removed`],
+      [e, run([0, 0], [1, 0], { ignore: [7] }), `${call}: ignore[0] must be a Body2D, got 7`],
+      [e, () => fresh().world[call]([0, 0], [1, 0], { ignore: [fresh().body] }), `${call}: ignore[0] belongs to another world`],
+      [e, () => { const { world, body } = dead(); world[call]([0, 0], [1, 0], { ignore: [body] }); }, `${call}: ignore[0] was removed`],
+    ];
+  }),
+  ...['shapeCast', 'overlap'].flatMap((call) => {
+    const cast = call === 'shapeCast', e = `world-${call.toLowerCase()}`, where = cast ? 'origin' : 'position';
+    const go = (world, shape, at, o) => (cast ? world.shapeCast(shape, at, [1, 0], o) : world.overlap(shape, at, o));
+    const run = (shape, at = [0, 0], o) => () => go(fresh().world, shape, at, o);
+    return [
+      [e, () => go(gone().world, {}, [0, 0]), `${call}: this world was destroyed`],
+      [e, run(3), `${call}: shape must be an object, got 3`],
+      [e, run({ sise: 1 }), `${call}: shape: unknown option 'sise' (did you mean 'size'?)`],
+      [e, run({ friction: 1 }), `${call}: shape: unknown option 'friction' (the options are shape, size, radius, height)`],
+      [e, run({ shape: 'cone' }), `${call}: shape.shape must be 'box', 'circle' or 'capsule', got 'cone'`],
+      [e, run({ radius: 1 }), `${call}: shape: a box has no radius`],
+      [e, run({ size: [0, 1] }), `${call}: shape.size must be 2 positive numbers, got 0,1`],
+      [e, run({ shape: 'circle', radius: 0 }), `${call}: shape.radius must be a positive number, got 0`],
+      [e, run({ shape: 'capsule', height: 0 }), `${call}: shape.height must be a positive number, got 0`],
+      [e, run({ shape: 'capsule', radius: 5, height: 8 }), `${call}: shape.height must be at least twice radius (10), got 8`],
+      [e, run({}, [0]), `${call}: ${where} must be 2 finite numbers, got 0`],
+      [e, run({}, [0, 0], 3), `${call}: options must be an object, got 3`],
+      [e, run({}, [0, 0], { anlge: 1 }), `${call}: unknown option 'anlge' (did you mean 'angle'?)`],
+      [e, run({}, [0, 0], { banana: 1 }), `${call}: unknown option 'banana' (the options are ${cast ? 'maxDistance, ' : ''}mask, ignore, angle)`],
+      [e, run({}, [0, 0], { mask: 1.5 }), `${call}: mask must be a whole number that fits in 32 bits, got 1.5`],
+      [e, run({}, [0, 0], { ignore: {} }), `${call}: ignore must be a Body2D or a list of Body2Ds, got an object`],
+      [e, () => go(fresh().world, {}, [0, 0], { ignore: fresh().body }), `${call}: ignore belongs to another world`],
+      [e, () => { const { world, body } = dead(); go(world, {}, [0, 0], { ignore: body }); }, `${call}: ignore was removed`],
+      [e, run({}, [0, 0], { ignore: [null] }), `${call}: ignore[0] must be a Body2D, got null`],
+      [e, () => go(fresh().world, {}, [0, 0], { ignore: [fresh().body] }), `${call}: ignore[0] belongs to another world`],
+      [e, () => { const { world, body } = dead(); go(world, {}, [0, 0], { ignore: [body] }); }, `${call}: ignore[0] was removed`],
+      [e, run({}, [0, 0], { angle: NaN }), `${call}: angle must be a finite number, got NaN`],
+    ];
+  }),
+  ['world-shapecast', () => fresh().world.shapeCast({}, [0, 0], [0, 0]), 'shapeCast: direction must be 2 finite numbers, not both zero, got 0,0'],
+  ['world-shapecast', () => fresh().world.shapeCast({}, [0, 0], [1, 0], { maxDistance: -1 }), 'shapeCast: maxDistance must be 0 or more, got -1'],
+  ['world-contacts', () => gone().world.contacts(), 'contacts: this world was destroyed'],
+  ['world-contacts', () => fresh().world.contacts(3), 'contacts: body must be a Body2D, got 3'],
+  ['world-contacts', () => fresh().world.contacts(fresh().body), 'contacts: body belongs to another world'],
+  ['world-touching', () => gone().world.touching(gone().body), 'touching: this world was destroyed'],
+  ['world-touching', () => fresh().world.touching(3), 'touching: body must be a Body2D, got 3'],
+  ['world-touching', () => fresh().world.touching(fresh().body), 'touching: body belongs to another world'],
+  ['world-touching', () => { const { world, body } = dead(); world.touching(body); }, 'touching: body was removed'],
   ['world-setbody', () => gone().world.setBody(gone().body, {}), 'setBody: this world was destroyed'],
   ['world-setbody', () => fresh().world.setBody(3, {}), 'setBody: body must be a Body2D, got 3'],
   ['world-setbody', () => fresh().world.setBody(fresh().body, {}), 'setBody: body belongs to another world'],

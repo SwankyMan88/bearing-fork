@@ -32,6 +32,7 @@
 // Two points have their spread, and need none.
 
 import { collide, Manifold2 } from './collide2d.js';
+import { BEGIN, IMPACT } from '../events.js';
 import { Chain, Tilemap, touchChain, touchCores, touchTiles } from './level2d.js';
 import { resized } from '../core/slots.js';
 
@@ -158,6 +159,7 @@ function row(world, c, a, b, pair, pairs, tolerance, sub, manifold = found) {
   const p = world._position, a2 = 2 * a, b2 = 2 * b, sa = world._size[a], sb = world._size[b];
   const m = c.count++, nx = manifold.nx, ny = manifold.ny, m2 = 2 * m, m4 = 4 * m, count = manifold.count;
   c.a[m] = a; c.b[m] = b; c.points[m] = count; c.pair[m] = pair; c.sub[m] = sub;
+  c.gap[m] = count === 2 && manifold.separation[1] < manifold.separation[0] ? manifold.separation[1] : manifold.separation[0];
   c.normal[m2] = nx; c.normal[m2 + 1] = ny;
   // As in 3D: friction's geometric mean, so ice is slippery against anything;
   // restitution's larger, so a bouncy ball bounces off anything.
@@ -238,6 +240,65 @@ export function prepare(world, c) {
       c.rollMass[m] = spin > 0 ? 1 / spin : 0;
     }
   }
+}
+
+/**
+ * After the solve: which pairs touched this step, and an event for each that
+ * started or stopped; for one already touching, an impact if it was hit again.
+ * All as in 3D (contact.js touched): a pair touched if the solver pushed it or
+ * the step left it within the tolerance; an impact is a rise in the fastest
+ * pushed point's closing speed of more than a bounce too small to see, a rise
+ * and not a speed, or a body pressed by joints reads as hit every step.
+ */
+export function touched(world, pairs, c, gravity) {
+  const events = world._events, twice = 2 * gravity, ids = world._slots;
+  for (let f = 0; f < c.count;) {
+    const first = f, p = c.pair[f];
+    let hit = -1;
+    for (; f < c.count && c.pair[f] === p; f++) {
+      if (hit >= 0) continue;
+      let meets = c.gap[f] <= c.tolerance[f];
+      for (let k = 0; k < c.points[f] && !meets; k++) meets = c.maxNormalImpulse[2 * f + k] > 0;
+      if (meets) hit = f;
+    }
+    const idA = ids.id(pairs.a[p]), idB = ids.id(pairs.b[p]);
+    if (hit < 0) {
+      if (pairs.touching[p] === 1) { pairs.touching[p] = 0; events.end(idA, idB); }
+      continue;
+    }
+    let fast = -1, at = -1, speed = 0;
+    for (let r = first; r < f; r++) {
+      for (let k = 0; k < c.points[r]; k++) {
+        const i = 2 * r + k, s = -c.relativeVelocity[i];
+        if (s > speed && c.maxNormalImpulse[i] > 0) { speed = s; fast = r; at = i; }
+      }
+    }
+    const rise = speed - pairs.closing[p];
+    pairs.closing[p] = speed;
+    if (pairs.touching[p] === 1) {
+      if (rise > 0 && rise * rise > twice * c.tolerance[fast]) met(world, pairs, c, p, fast, at, speed, IMPACT);
+      continue;
+    }
+    pairs.touching[p] = 1;
+    let deepest = 2 * hit, fastest = 0;
+    for (let k = 0; k < c.points[hit]; k++) {
+      const i = 2 * hit + k;
+      if (-c.relativeVelocity[i] > fastest) fastest = -c.relativeVelocity[i];
+      if (c.maxNormalImpulse[i] > c.maxNormalImpulse[deepest]) deepest = i;
+    }
+    met(world, pairs, c, p, hit, deepest, fastest, BEGIN);
+  }
+}
+
+/** A begin or impact for pair p at point i of row m: where the two met, in the world, the row's normal turned a to b of the pair. */
+function met(world, pairs, c, p, m, i, speed, type) {
+  const a = c.a[m], b = c.b[m], k = i - 2 * m, turned = a === pairs.a[p] ? 1 : -1, start = world._start2, now = world._position;
+  // Found where the step began: moved on by half of what the two moved in it,
+  // so it lands where they met rather than where the step started them.
+  const a2 = 2 * a, b2 = 2 * b, j = 4 * m + 2 * k;
+  const x = start[a2] + c.ra[j] + (now[a2] - start[a2] + now[b2] - start[b2]) * 0.5;
+  const y = start[a2 + 1] + c.ra[j + 1] + (now[a2 + 1] - start[a2 + 1] + now[b2 + 1] - start[b2 + 1]) * 0.5;
+  world._events.begin(world._slots.id(pairs.a[p]), world._slots.id(pairs.b[p]), x, y, 0, turned * c.normal[2 * m], turned * c.normal[2 * m + 1], 0, speed, type);
 }
 
 /** The last step's pushes again, at each substep's start, so a stack starts from what held it. */

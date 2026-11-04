@@ -14,7 +14,8 @@ All notable changes to Bearing are recorded here. The format follows
   turn and take forces. They collide, stack, slide, bounce and roll, by the 3D solver's method, and
   thousands at once sleep and cost nothing. A `tilemap` takes Winding's numbers, costs nothing for
   its size, has no seams to catch on, and changes with `world.setTile`; a `chain` is a one-sided
-  line for slopes. See [the 2D reference](docs/API-2D.md).
+  line for slopes. Rays, shape casts, overlap tests, contact events with impacts, and sensors work
+  as in 3D. See [the 2D reference](docs/API-2D.md).
 
 ## [1.2.0] - 2026-11-03
 

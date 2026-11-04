@@ -33,17 +33,24 @@ import { Body2D } from './body2d.js';
 import { compound, convexHull, plain } from './shapes2d.js';
 import { Core } from './collide2d.js';
 import { Chain, Tilemap } from './level2d.js';
-import { Contacts2D, PIXEL, makeSoft, meet, meetMany, prepare, restitution, soft, solve, store, warmStart } from './contact2d.js';
+import { Contacts2D, PIXEL, makeSoft, meet, meetMany, prepare, restitution, soft, solve, store, touched, warmStart } from './contact2d.js';
+import { Events, END, IMPACT } from '../events.js';
+import { overlap as overlapping, ray, sweep } from './query2d.js';
 import { Broad2D, Pairs2D, pairable } from './pairs2d.js';
 
 const WORLD_OPTIONS = ['gravity', 'substeps', 'sleeping'];
 const BODY_OPTIONS = [
   'type', 'shape', 'size', 'radius', 'height', 'vertices', 'parts', 'tileSize', 'columns', 'rows', 'tiles',
   'density', 'mass', 'inertia', 'centerOfMass',
-  'friction', 'restitution', 'damping', 'angularDamping', 'gravityScale', 'layers', 'mask', 'group',
+  'friction', 'restitution', 'damping', 'angularDamping', 'gravityScale', 'layers', 'mask', 'group', 'sensor',
   'lockRotation', 'lockPosition',
   'position', 'angle', 'velocity', 'angularVelocity',
 ];
+const RAY_OPTIONS = ['maxDistance', 'mask', 'ignore'];
+const CAST_OPTIONS = ['maxDistance', 'mask', 'ignore', 'angle'];
+const OVERLAP_OPTIONS = ['mask', 'ignore', 'angle'];
+const QUERY_SHAPE = ['shape', 'size', 'radius', 'height'];
+const QUERY_SHAPES = ['box', 'circle', 'capsule'];
 const PART_OPTIONS = ['shape', 'size', 'radius', 'height', 'vertices', 'position', 'angle', 'density'];
 const TYPES = ['dynamic', 'static', 'kinematic'];
 const SHAPES = ['box', 'circle', 'capsule', 'polygon', 'compound', 'tilemap', 'chain'];
@@ -83,7 +90,7 @@ const DEFAULTS = Object.freeze({
   density: 0.1, mass: 0, massGiven: false, inertia: 0, inertiaGiven: false, centerOfMass: null,
   friction: 0.5, restitution: 0, damping: 0, angularDamping: 0, gravityScale: 1,
   // Everything collides with everything until told otherwise, as in 3D.
-  layers: 1, mask: 0xffffffff, group: 0,
+  layers: 1, mask: 0xffffffff, group: 0, sensor: false,
   lockRotation: false, lockPosition: [false, false],
   position: [0, 0], angle: 0, velocity: [0, 0], angularVelocity: 0,
 });
@@ -91,6 +98,7 @@ const DEFAULTS = Object.freeze({
 /** Every per-slot column: name, array type, numbers per slot. */
 const COLUMNS = [
   ['_position', Float64Array, 2],    // of the centre of mass, px
+  ['_start2', Float64Array, 2],      // where it was as the step began: scratch, for events
   ['_rotation', Float64Array, 2],    // cos, sin
   ['_angle', Float64Array, 1],       // the same turn as a number, unwrapped
   ['_startTurn', Float64Array, 2],   // cos, sin as the step began: scratch, for _angle
@@ -120,6 +128,7 @@ const COLUMNS = [
   ['_layers', Uint32Array, 1],       // which of 32 layers it is in, as bits
   ['_mask', Uint32Array, 1],         // which it collides with
   ['_group', Float64Array, 1],       // bodies of one group, but 0, never collide
+  ['_sensor', Uint8Array, 1],
   ['_lockRotation', Uint8Array, 1],
   ['_lockMove', Uint8Array, 1],      // bit 0: never moves along x; bit 1: along y
   ['_inAwake', Int32Array, 1],       // 1 + its place in _awakeList, or 0
@@ -139,7 +148,7 @@ const COLUMNS = [
   ['_previous', Float32Array, 3],
 ];
 
-const POSE = new Float64Array(3);
+const POSE = new Float64Array(3), CAST = new Float64Array(5);
 /** Pairs read off a body's list before changing it: rows move as pairs are woken or dropped. */
 const WOKEN = [];
 const TOUCHED = [];
@@ -154,7 +163,7 @@ export class World2D {
     this._slots = new Slots();
     // Every column named first, then made: an object given more than a dozen
     // fields by computed name becomes a dictionary (world.js, FAST PROPERTIES).
-    this._position = null; this._rotation = null; this._angle = null; this._startTurn = null;
+    this._position = null; this._start2 = null; this._sensor = null; this._rotation = null; this._angle = null; this._startTurn = null;
     this._velocity = null; this._angular = null; this._offset = null; this._com = null;
     this._comGiven = null; this._dims = null; this._shape = null; this._type = null;
     this._mass = null; this._massGiven = null; this._density = null; this._inertia = null;
@@ -180,6 +189,15 @@ export class World2D {
     /** Bodies filed in trees, and the pairs near each other (pairs2d.js). */
     this._broad = new Broad2D();
     this._pairs = new Pairs2D();
+    /** Contact events (events.js, as in 3D): the last step's. */
+    this._events = new Events();
+    /** Ends of pairs a removal took, for the next step to report, with both ids. */
+    this._endsDue = [];
+    /** Pairs with a sensor in them, this step, checked after it; a scratch row set to check them with. */
+    this._sensed = [];
+    this._sensedRows = new Contacts2D();
+    /** Sensor passes run: for the off-means-off test, which reads it. */
+    this._sensorPasses = 0;
     /** Slots that stopped moving, for moved(): a list, so a world at rest walks none of it. */
     this._stopped = [];
     this._stoppedFloor = 0;
@@ -290,7 +308,7 @@ export class World2D {
     const pairs = this._pairs;
     WOKEN.length = 0;
     for (let e = pairs.head[s] - 1; e >= 0; e = pairs.next[e] - 1) WOKEN.push(pairs.a[e >> 1], pairs.b[e >> 1]);
-    for (let k = 0; k < WOKEN.length; k += 2) if (!pairable(this, WOKEN[k], WOKEN[k + 1])) pairs.drop(pairs.find(WOKEN[k], WOKEN[k + 1]));
+    for (let k = 0; k < WOKEN.length; k += 2) if (!pairable(this, WOKEN[k], WOKEN[k + 1])) this._dropPair(pairs.find(WOKEN[k], WOKEN[k + 1]));
     this._broad.refile(this, s);
   }
 
@@ -308,7 +326,7 @@ export class World2D {
     }
     out.friction = spec.friction; out.restitution = spec.restitution;
     out.damping = spec.damping; out.angularDamping = spec.angularDamping; out.gravityScale = spec.gravityScale;
-    out.layers = spec.layers; out.mask = spec.mask; out.group = spec.group;
+    out.layers = spec.layers; out.mask = spec.mask; out.group = spec.group; out.sensor = spec.sensor;
     out.lockRotation = spec.lockRotation;
     out.lockPosition = [...spec.lockPosition];
     out.position = [...spec.position];
@@ -323,6 +341,142 @@ export class World2D {
   /** Takes a body out. Removing one already gone does nothing, as in Winding. */
   remove(handle_) {
     this._remove('remove', handle_);
+  }
+
+  // ---- queries (query2d.js) ----
+
+  /** The nearest body the ray from `origin` along `direction` meets, or null. */
+  raycast(origin, direction, options_) {
+    const p = this._origin('raycast', origin), d = unit('raycast', direction);
+    const o = this._queryOptions('raycast', options_, RAY_OPTIONS);
+    let found = null;
+    ray(this, p[0], p[1], d[0], d[1], o.maxDistance, o.mask, o.ignore, (s, t, nx, ny) => { found = this._hit(s, t, nx, ny, p[0] + t * d[0], p[1] + t * d[1]); }, true);
+    return found;
+  }
+
+  /** Every body the ray meets, nearest first. */
+  raycastAll(origin, direction, options_) {
+    const p = this._origin('raycastAll', origin), d = unit('raycastAll', direction);
+    const o = this._queryOptions('raycastAll', options_, RAY_OPTIONS);
+    const hits = [];
+    ray(this, p[0], p[1], d[0], d[1], o.maxDistance, o.mask, o.ignore, (s, t, nx, ny) => { hits.push(this._hit(s, t, nx, ny, p[0] + t * d[0], p[1] + t * d[1])); }, false);
+    return hits.sort((a, b) => a.distance - b.distance || a.body.slot - b.body.slot);
+  }
+
+  /** The first body `shape`, moving from `origin` along `direction`, would touch, or null. */
+  shapeCast(shape, origin, direction, options_) {
+    const core = this._queryShape('shapeCast', shape), p = this._origin('shapeCast', origin), d = unit('shapeCast', direction);
+    const o = this._queryOptions('shapeCast', options_, CAST_OPTIONS), c = cos(o.angle), z = sin(o.angle);
+    const tolerance = core.size * PIXEL;
+    const s = sweep(this, core, p[0], p[1], c, z, d[0], d[1], o.maxDistance === Infinity ? this._castFar(p) : o.maxDistance, tolerance,
+      (slot) => this._layers[slot] & o.mask && this._sensor[slot] === 0 && !o.ignore.includes(slot), CAST);
+    return s < 0 ? null : this._hit(s, CAST[0], CAST[1], CAST[2], CAST[3], CAST[4]);
+  }
+
+  /** The bodies `shape`, placed at `position`, overlaps or touches. */
+  overlap(shape, position, options_) {
+    const core = this._queryShape('overlap', shape), p = vec2('overlap', 'position', position);
+    const o = this._queryOptions('overlap', options_, OVERLAP_OPTIONS), bodies = [];
+    overlapping(this, core, p[0], p[1], cos(o.angle), sin(o.angle), o.mask, o.ignore, (s) => bodies.push(new Body2D(this, this._slots.id(s))));
+    return bodies;
+  }
+
+  /** A cast with no limit goes as far as the world does. */
+  _castFar(p) {
+    const t = this._broad.trees;
+    let far = 0;
+    for (const tree of t) {
+      if (tree.root < 0) continue;
+      const b = tree.box, o = 6 * tree.root;
+      far = Math.max(far, Math.abs(b[o] - p[0]), Math.abs(b[o + 3] - p[0]), Math.abs(b[o + 1] - p[1]), Math.abs(b[o + 4] - p[1]));
+    }
+    return 2 * far;
+  }
+
+  _origin(caller, value) {
+    this._live(caller);
+    return vec2(caller, 'origin', value);
+  }
+
+  _hit(s, t, nx, ny, x, y) {
+    return { body: new Body2D(this, this._slots.id(s)), point: [x, y], normal: [nx, ny], distance: t };
+  }
+
+  /** A query's options, checked, with their defaults. */
+  _queryOptions(caller, given, names) {
+    const o = options(caller, given);
+    known(caller, o, names);
+    let maxDistance = Infinity;
+    if (o.maxDistance !== undefined) {
+      const m = o.maxDistance;
+      if (typeof m !== 'number' || !(m >= 0)) fail(caller, `maxDistance must be 0 or more, got ${show(m)}`);
+      maxDistance = m;
+    }
+    const mask = o.mask === undefined ? 0xffffffff : bits(caller, 'mask', o.mask);
+    const ignore = [], list = o.ignore;
+    if (Array.isArray(list)) {
+      for (let k = 0; k < list.length; k++) ignore.push(handle(caller, `ignore[${k}]`, list[k], this, Body2D, this._slots));
+    } else if (list !== undefined && list !== null) {
+      if (!(list instanceof Body2D)) fail(caller, `ignore must be a Body2D or a list of Body2Ds, got ${show(list)}`);
+      ignore.push(handle(caller, 'ignore', list, this, Body2D, this._slots));
+    }
+    const angle = o.angle === undefined ? 0 : finite(caller, 'angle', o.angle);
+    return { maxDistance, mask, ignore, angle };
+  }
+
+  /** A query's shape, as a core: addBody's names and defaults, box, circle or capsule. */
+  _queryShape(caller, shape) {
+    this._live(caller);
+    const o = options(caller, shape, 'shape');
+    known(`${caller}: shape`, o, QUERY_SHAPE);
+    const kind = o.shape === undefined ? 'box' : oneOf(caller, 'shape.shape', o.shape, QUERY_SHAPES);
+    for (const k of ['size', 'radius', 'height']) if (o[k] !== undefined && !SIZES[kind].includes(k)) fail(`${caller}: shape`, `a ${kind} has no ${k}`);
+    const s = sizes(caller, 'shape.', kind, o, DEFAULTS);
+    return this._coreOf(kind, s.size, s.radius, s.height, null, 0, 0, 0, 0, 0);
+  }
+
+  // ---- contact events ----
+
+  /**
+   * The last step's contact events: which pairs began touching, which met
+   * again while touching, and which stopped, as fresh plain objects. Given a
+   * body, only its own, each turned so that `a` is that body. A body removed
+   * since still has its events, its handle reading as dead.
+   */
+  contacts(body) {
+    this._live('contacts');
+    let id = -1;
+    if (body !== undefined) {
+      handle('contacts', 'body', body, this, Body2D, this._slots, true);
+      id = body.id;
+    }
+    const e = this._events, out = [];
+    for (let i = 0; i < e.count; i++) {
+      let a = e.idA[i], b = e.idB[i];
+      const turned = id >= 0 && b === id;
+      if (id >= 0 && a !== id && !turned) continue;
+      if (turned) { b = a; a = id; }
+      if (e.type[i] === END) {
+        out.push({ type: 'end', a: new Body2D(this, a), b: new Body2D(this, b) });
+        continue;
+      }
+      const i3 = 3 * i, n = e.normal, k = (x) => (turned ? 0 - x : x);
+      out.push({
+        type: e.type[i] === IMPACT ? 'impact' : 'begin', a: new Body2D(this, a), b: new Body2D(this, b),
+        point: [e.point[i3], e.point[i3 + 1]], normal: [k(n[i3]), k(n[i3 + 1])], speed: e.speed[i],
+      });
+    }
+    return out;
+  }
+
+  /** Every body touching this one, as of the last step: its own pairs, so it costs what it touches. */
+  touching(body) {
+    const s = this._slotOfBody('touching', body), pairs = this._pairs, out = [];
+    for (let e = pairs.head[s] - 1; e >= 0; e = pairs.next[e] - 1) {
+      const p = e >> 1;
+      if (pairs.touching[p] === 1) out.push(new Body2D(this, this._slots.id(pairs.a[p] === s ? pairs.b[p] : pairs.a[p])));
+    }
+    return out;
   }
 
   /** Tile (x, y) of a tilemap body: as Winding's scene.setTile, 0 for empty. What that uncovers wakes. */
@@ -386,12 +540,17 @@ export class World2D {
     this._live('step');
     if (typeof dt !== 'number' || !(dt > 0) || dt === Infinity) fail('step', `dt must be a positive number of seconds, got ${show(dt)}`);
     this._stepCount++;
+    this._events.count = 0;
+    const due = this._endsDue;
+    for (let k = 0; k < due.length; k += 2) this._events.end(due[k], due[k + 1]);
+    due.length = 0;
     if (this._forcedSlots.length > 0) this._applyForces(dt);
     const list = this._awakeList, tr = this._transforms, prev = this._previous, r = this._rotation, turn = this._startTurn;
     for (let i = 0; i < this._awakeCount; i++) {
       const s = list[i], t3 = 3 * s, s2 = 2 * s;
       prev[t3] = tr[t3]; prev[t3 + 1] = tr[t3 + 1]; prev[t3 + 2] = tr[t3 + 2];
       turn[s2] = r[s2]; turn[s2 + 1] = r[s2 + 1];
+      this._start2[s2] = this._position[s2]; this._start2[s2 + 1] = this._position[s2 + 1];
     }
     const substeps = this._substeps, h = dt / substeps, pins = this._lockMoveCount > 0, g = this._gravity;
     const gravity = Math.sqrt(g[0] * g[0] + g[1] * g[1]), c = this._contacts;
@@ -415,7 +574,10 @@ export class World2D {
       restitution(this, c, gravity);
       if (pins) this._pin();
       store(c, this._pairs);
+      touched(this, this._pairs, c, gravity);
     }
+    if (this._sensed.length > 0) this._senseAll();
+    this._events.trim();
     const angle = this._angle;
     for (let i = 0; i < this._awakeCount; i++) {
       const s = list[i], s2 = 2 * s, c = r[s2], z = r[s2 + 1], c0 = turn[s2], z0 = turn[s2 + 1];
@@ -425,6 +587,9 @@ export class World2D {
       this._place(s);
       this._movedAt[s] = this._stepCount;
     }
+    // Bodies out of their fat boxes are filed again now, so queries between
+    // steps find them where they are; 3D keeps a list of strays instead.
+    this._broad.update(this);
     if (this._sleeping) this._sleep(dt);
   }
 
@@ -441,6 +606,10 @@ export class World2D {
     this._contacts = new Contacts2D();
     this._broad = new Broad2D();
     this._pairs = new Pairs2D();
+    this._events = new Events();
+    this._endsDue = [];
+    this._sensed = [];
+    this._sensedRows = new Contacts2D();
     this._stopped = [];
     this._forcedSlots = [];
     this._awakeCount = 0;
@@ -608,7 +777,15 @@ export class World2D {
     this._wake(s);
     this._wakeTouching(s);
     const pairs = this._pairs;
-    while (pairs.head[s] !== 0) pairs.drop((pairs.head[s] - 1) >> 1);
+    const id = this._slots.id(s);
+    while (pairs.head[s] !== 0) {
+      const p = (pairs.head[s] - 1) >> 1;
+      if (pairs.touching[p] === 1) {
+        const other = pairs.a[p] === s ? pairs.b[p] : pairs.a[p];
+        this._endsDue.push(id, this._slots.id(other));
+      }
+      pairs.drop(p);
+    }
     this._broad.remove(s);
     // A force waiting on this slot must not land on whichever body gets it next.
     this._forced[s] = 0;
@@ -687,6 +864,7 @@ export class World2D {
       this._rest[4 * b + 2] = r[b2]; this._rest[4 * b + 3] = r[b2 + 1];
       // Woken by a touch in the middle of finding contacts: this step's start is now.
       turn[b2] = r[b2]; turn[b2 + 1] = r[b2 + 1];
+      this._start2[b2] = this._position[b2]; this._start2[b2 + 1] = this._position[b2 + 1];
       this._previous[t3] = this._transforms[t3]; this._previous[t3 + 1] = this._transforms[t3 + 1]; this._previous[t3 + 2] = this._transforms[t3 + 2];
       // Waking a pair swaps rows, which moves edges, so the list is read first.
       WOKEN.length = 0;
@@ -754,6 +932,7 @@ export class World2D {
     this._angle[s] = angle;
     this._position[s2] = x + c * ox - z * oy;
     this._position[s2 + 1] = y + z * ox + c * oy;
+    this._start2[s2] = this._position[s2]; this._start2[s2 + 1] = this._position[s2 + 1];
   }
 
   /** Copies a slot's pose out to `transforms`. */
@@ -789,7 +968,7 @@ export class World2D {
       centerOfMass: this._comGiven[s] === 1 ? [this._com[s2], this._com[s2 + 1]] : null,
       friction: this._friction[s], restitution: this._restitution[s], damping: this._damping[s],
       angularDamping: this._angularDamping[s], gravityScale: this._gravityScale[s],
-      layers: this._layers[s], mask: this._mask[s], group: this._group[s],
+      layers: this._layers[s], mask: this._mask[s], group: this._group[s], sensor: this._sensor[s] === 1,
       lockRotation: this._lockRotation[s] === 1,
       lockPosition: [(this._lockMove[s] & 1) !== 0, (this._lockMove[s] & 2) !== 0],
       position: [POSE[0], POSE[1]], angle: POSE[2],
@@ -842,6 +1021,7 @@ export class World2D {
     this._damping[s] = spec.damping; this._angularDamping[s] = spec.angularDamping;
     this._gravityScale[s] = spec.gravityScale;
     this._layers[s] = spec.layers; this._mask[s] = spec.mask; this._group[s] = spec.group;
+    this._sensor[s] = spec.sensor ? 1 : 0;
     this._lockRotation[s] = spec.lockRotation ? 1 : 0;
     const held = (spec.lockPosition[0] ? 1 : 0) | (spec.lockPosition[1] ? 2 : 0);
     this._lockMoveCount += (held !== 0 ? 1 : 0) - (this._lockMove[s] !== 0 ? 1 : 0);
@@ -932,14 +1112,17 @@ export class World2D {
       const speed = Math.sqrt(v[s2] * v[s2] + v[s2 + 1] * v[s2 + 1]) + (type[s] === DYNAMIC ? gravity * dt : 0);
       motion[s] = (speed + (shape[s] === CIRCLE ? 0 : Math.abs(w[s]) * reach[s])) * dt;
     }
-    const broad = this._broad, pairs = this._pairs, c = this._contacts, core = this._core, island = this._island;
+    const broad = this._broad, pairs = this._pairs, c = this._contacts, core = this._core, island = this._island, sensor = this._sensor;
+    this._sensed.length = 0;
     broad.update(this);
     if (broad.movedCount > 0) broad.candidates(this, pairs);
     c.count = 0;
     // `active` may grow as this walks: a pair woken here is looked at this step.
     for (let p = 0; p < pairs.active;) {
       const a = pairs.a[p], b = pairs.b[p];
-      if (!broad.overlap(a, b)) { pairs.drop(p); continue; }
+      if (!broad.overlap(a, b)) { this._dropPair(p); continue; }
+      // A sensor's pair has no manifold: it is checked after the step.
+      if (sensor[a] === 1 || sensor[b] === 1) { this._sensed.push(p); p++; continue; }
       this._narrowed++;
       // A compound or a level touches in many places; everything else, one.
       const touched = core[a] !== null && core[b] !== null ? meet(this, c, a, b, p, pairs) : meetMany(this, c, a, b, p, pairs) > 0;
@@ -949,8 +1132,49 @@ export class World2D {
         if (island[b] !== 0) this._wake(b);
       } else {
         pairs.ids[2 * p] = -1; pairs.ids[2 * p + 1] = -1; pairs.roll[p] = 0; pairs.extraCount[p] = 0;
+        if (pairs.touching[p] === 1) {
+          pairs.touching[p] = 0;
+          this._events.end(this._slots.id(a), this._slots.id(b));
+        }
       }
       p++;
+    }
+  }
+
+  /** Pair p goes; if it was touching, that is its end. */
+  _dropPair(p) {
+    const pairs = this._pairs;
+    if (pairs.touching[p] === 1) this._events.end(this._slots.id(pairs.a[p]), this._slots.id(pairs.b[p]));
+    pairs.drop(p);
+  }
+
+  /**
+   * Every pair with a sensor in it, where the step left its bodies: touching
+   * if within a contact's tolerance, and an event if that changed. A body that
+   * passes all the way through a sensor within one step isn't seen.
+   */
+  _senseAll() {
+    this._sensorPasses++;
+    const pairs = this._pairs, rows = this._sensedRows, core = this._core, v = this._velocity, sensed = this._sensed;
+    const motion = this._motion;
+    for (let i = 0; i < sensed.length; i++) {
+      const p = sensed[i], a = pairs.a[p], b = pairs.b[p], ma = motion[a], mb = motion[b];
+      rows.count = 0;
+      motion[a] = 0; motion[b] = 0;   // where they are, with no reach ahead
+      if (core[a] !== null && core[b] !== null) meet(this, rows, a, b, p, pairs);
+      else meetMany(this, rows, a, b, p, pairs);
+      motion[a] = ma; motion[b] = mb;
+      let hit = -1;
+      for (let m = 0; m < rows.count && hit < 0; m++) if (rows.gap[m] <= rows.tolerance[m]) hit = m;
+      const now = hit >= 0 ? 1 : 0;
+      if (now === pairs.touching[p]) continue;
+      pairs.touching[p] = now;
+      const idA = this._slots.id(a), idB = this._slots.id(b);
+      if (now === 0) { this._events.end(idA, idB); continue; }
+      const m2 = 2 * hit, turned = rows.a[hit] === a ? 1 : -1, nx = turned * rows.normal[m2], ny = turned * rows.normal[m2 + 1];
+      const closing = -((v[2 * b] - v[2 * a]) * nx + (v[2 * b + 1] - v[2 * a + 1]) * ny);
+      const j = 4 * hit, s = rows.a[hit], x = this._position[2 * s] + rows.ra[j], y = this._position[2 * s + 1] + rows.ra[j + 1];
+      this._events.begin(idA, idB, x, y, 0, nx, ny, 0, closing > 0 ? closing : 0);
     }
   }
 
@@ -1123,6 +1347,14 @@ const bits = (caller, name, value) => {
   return value >>> 0;
 };
 
+/** Two finite numbers, not both zero, scaled to unit length, past overflow as check.js direction. */
+const unit = (caller, value) => {
+  const ok = value !== null && typeof value === 'object' && value.length === 2 && Number.isFinite(value[0]) && Number.isFinite(value[1]) && (value[0] !== 0 || value[1] !== 0);
+  if (!ok) fail(caller, `direction must be 2 finite numbers, not both zero, got ${show(value)}`);
+  const m = Math.max(Math.abs(value[0]), Math.abs(value[1])), x = value[0] / m, y = value[1] / m, l = 1 / Math.sqrt(x * x + y * y);
+  return [x * l, y * l];
+};
+
 const flag = (caller, name, value) => {
   if (typeof value !== 'boolean') fail(caller, `${name} must be true or false, got ${show(value)}`);
   return value;
@@ -1256,6 +1488,7 @@ function resolve(caller, base, given) {
     group = given.group;
     if (!Number.isSafeInteger(group) || group < 0) fail(caller, `group must be a whole number, 0 or more, got ${show(group)}`);
   }
+  const sensor = has('sensor') ? flag(caller, 'sensor', given.sensor) : base.sensor;
   const lockRotation = has('lockRotation') ? flag(caller, 'lockRotation', given.lockRotation) : base.lockRotation;
   let lockPosition = base.lockPosition;
   if (has('lockPosition')) {
@@ -1275,7 +1508,7 @@ function resolve(caller, base, given) {
   const angularVelocity = has('angularVelocity') ? finite(caller, 'angularVelocity', given.angularVelocity) : base.angularVelocity;
   return {
     type, shape, size, radius, height, vertices, parts, tileSize, columns, rows, tiles, density, mass, massGiven, inertia, inertiaGiven, centerOfMass,
-    friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, lockRotation, lockPosition,
+    friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, sensor, lockRotation, lockPosition,
     position, angle, velocity, angularVelocity,
   };
 }

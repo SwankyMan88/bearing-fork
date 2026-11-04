@@ -67,6 +67,8 @@ export interface BodyOptions2D {
   mask?: number;
   /** Bodies of the same group never collide with each other; any whole number. Default 0, none. */
   group?: number;
+  /** Reports what overlaps it and pushes nothing. Default false. */
+  sensor?: boolean;
   /** Whether it never turns. Default false. */
   lockRotation?: boolean;
   /** The axes it never moves along, x and y. Default [false, false]. */
@@ -110,6 +112,7 @@ export interface BodyInfo2D {
   /** Unsigned. */
   mask: number;
   group: number;
+  sensor: boolean;
   lockRotation: boolean;
   lockPosition: [boolean, boolean];
   position: [number, number];
@@ -120,6 +123,46 @@ export interface BodyInfo2D {
   /** Absent for a static body. */
   angularVelocity?: number;
 }
+
+export interface RayOptions2D {
+  /** px. Default Infinity. */
+  maxDistance?: number;
+  /** Which of the 32 layers to hit, as bits. Default 0xffffffff. */
+  mask?: number;
+  /** A body to leave out, or a list of them. */
+  ignore?: Body2D | readonly Body2D[] | null;
+}
+
+export interface CastOptions2D extends RayOptions2D {
+  /** How the shape is turned. Default 0. */
+  angle?: number;
+}
+
+export type OverlapOptions2D = Omit<CastOptions2D, 'maxDistance'>;
+
+/** A shape to cast or test, with addBody's names and defaults. */
+export interface QueryShape2D {
+  shape?: 'box' | 'circle' | 'capsule';
+  size?: Vec2;
+  radius?: number;
+  height?: number;
+}
+
+/** What raycast, raycastAll and shapeCast find. */
+export interface Hit2D {
+  body: Body2D;
+  point: [number, number];
+  normal: [number, number];
+  distance: number;
+}
+
+/** Two bodies began touching: where, which way (from a to b), and how fast they met, px/s. */
+export interface BeginEvent2D { type: 'begin'; a: Body2D; b: Body2D; point: [number, number]; normal: [number, number]; speed: number }
+/** Two bodies already touching met again: a begin's fields. */
+export interface ImpactEvent2D { type: 'impact'; a: Body2D; b: Body2D; point: [number, number]; normal: [number, number]; speed: number }
+/** Two bodies stopped touching. A removed body's handle reads as dead. */
+export interface EndEvent2D { type: 'end'; a: Body2D; b: Body2D }
+export type ContactEvent2D = BeginEvent2D | ImpactEvent2D | EndEvent2D;
 
 export interface WorldOptions2D {
   /** px/s². Default [0, 980]. */
@@ -151,6 +194,12 @@ export class World2D {
   setTile(body: Body2D, x: number, y: number, id: number): void;
   tileAt(body: Body2D, x: number, y: number): number;
   body(id: number): Body2D;
+  raycast(origin: Vec2, direction: Vec2, options?: RayOptions2D): Hit2D | null;
+  raycastAll(origin: Vec2, direction: Vec2, options?: RayOptions2D): Hit2D[];
+  shapeCast(shape: QueryShape2D, origin: Vec2, direction: Vec2, options?: CastOptions2D): Hit2D | null;
+  overlap(shape: QueryShape2D, position: Vec2, options?: OverlapOptions2D): Body2D[];
+  contacts(body?: Body2D): ContactEvent2D[];
+  touching(body: Body2D): Body2D[];
   /** The slots of bodies that moved since step `since`. */
   moved(since: number): Int32Array;
   step(dt: number): void;

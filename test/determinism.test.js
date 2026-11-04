@@ -16,7 +16,7 @@ import { World2D } from '../src/2d/bearing2d.js';
 suite('determinism');
 
 const HASH = '8ba8e0f14c1a6cd6586f8476c1112a01c296555bcee6d122b013aff6e67bff5f';
-const HASH_2D = '4ad091c20764ec4bb786d0028bf6669821bc57f9369b073b9edab9bc00786dd2';
+const HASH_2D = 'e7199037121728216d7b1ac794955b0b66875d192fa5d861d66c02e98d96d532';
 
 test('a world of everything steps to the stored bits', () => {
   const { world } = mixed({ workers: 0 });
@@ -48,6 +48,7 @@ test('a 2D world steps to its stored bits', () => {
   world.addBody({ shape: 'chain', vertices: [-500, 280, -200, 240, 0, 270, 300, 230, 500, 280] });
   const bodies = [];
   for (let k = 0; k < 40; k++) {
+    if (k === 20) world.addBody({ type: 'static', size: [120, 200], position: [0, 100], sensor: true });
     const common = { position: [k * 37.5 - 400, -k * 11.25], angle: k * 0.7, restitution: k % 4 === 0 ? 0.6 : 0, velocity: [k - 20, -3 * k], angularVelocity: 0.3 * k - 6, damping: k % 3 === 0 ? 0.2 : 0, angularDamping: k % 5 === 0 ? 0.1 : 0, lockPosition: [k % 7 === 0, false] };
     const shape = k % 5;
     bodies.push(world.addBody(

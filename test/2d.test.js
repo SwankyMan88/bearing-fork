@@ -258,6 +258,7 @@ test('off means off: a world of static bodies moves nothing, and destroy lets go
 test('nothing in the step makes an array or a view', () => {
   const world = new World2D();
   for (let k = 0; k < 50; k++) world.addBody({ position: [k, 0], angularVelocity: 1, lockPosition: [false, k % 2 === 0] });
+  for (let s = 0; s < 30; s++) world.step(DT);   // storage grown to what the scene needs
   const made = [];
   const sub = Float64Array.prototype.subarray, slice = Float64Array.prototype.slice;
   Float64Array.prototype.subarray = function (...a) { made.push('subarray'); return sub.apply(this, a); };
