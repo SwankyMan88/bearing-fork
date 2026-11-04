@@ -11,10 +11,12 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { suite, test } from './test.js';
 import { mixed } from './scenes.js';
+import { World2D } from '../src/2d/bearing2d.js';
 
 suite('determinism');
 
 const HASH = '8ba8e0f14c1a6cd6586f8476c1112a01c296555bcee6d122b013aff6e67bff5f';
+const HASH_2D = 'ace2ecaa06631b26b099c199f47e28d04d3ba54055e08414b71f5809eb036402';
 
 test('a world of everything steps to the stored bits', () => {
   const { world } = mixed({ workers: 0 });
@@ -33,4 +35,37 @@ test('a world of everything steps to the stored bits', () => {
   world.destroy();
   const got = hash.digest('hex');
   assert.equal(got, HASH, `the bits changed: if that is meant, store ${got} as HASH`);
+});
+
+test('a 2D world steps to its stored bits', () => {
+  // Every shape, spun, pushed, damped, locked and driven, placed through the
+  // calls that take an angle, so Bearing's own sine and cosine are in the hash.
+  const world = new World2D();
+  const bodies = [];
+  for (let k = 0; k < 40; k++) {
+    const common = { position: [k * 37.5 - 200, -k * 11.25], angle: k * 0.7, velocity: [k - 20, -3 * k], angularVelocity: 0.3 * k - 6, damping: k % 3 === 0 ? 0.2 : 0, angularDamping: k % 5 === 0 ? 0.1 : 0, lockPosition: [k % 7 === 0, false] };
+    const shape = k % 5;
+    bodies.push(world.addBody(
+      shape === 0 ? { ...common, size: [20 + k, 10] }
+        : shape === 1 ? { ...common, shape: 'circle', radius: 6 + k * 0.25 }
+          : shape === 2 ? { ...common, shape: 'capsule', radius: 5, height: 30 }
+            : shape === 3 ? { ...common, shape: 'polygon', vertices: [0, 0, 16, 2, 11, 13, 3, 9] }
+              : { ...common, shape: 'compound', parts: [{ size: [12, 4], position: [6, 2], angle: 0.4 }, { shape: 'circle', radius: 3, position: [2, 8], density: 0.4 }] },
+    ));
+  }
+  const lift = world.addBody({ type: 'kinematic', size: [80, 8] });
+  const hash = createHash('sha256');
+  const bytes = (a) => hash.update(new Uint8Array(a.buffer, a.byteOffset, a.byteLength));
+  for (let n = 1; n <= 600; n++) {
+    bodies[n % 40].applyForce([300, -200], [n, n]);
+    if (n % 7 === 0) bodies[n % 40].applyTorque(900);
+    if (n % 50 === 0) bodies[n % 40].setAngle(n * 0.123);
+    lift.moveTo([n * 0.5, n * 0.25], n * 0.01, 1 / 60);
+    world.step(1 / 60);
+    bytes(world.transforms);
+    if (n % 60 === 0) for (const column of [world._position, world._rotation, world._angle, world._velocity, world._angular]) bytes(column);
+  }
+  world.destroy();
+  const got = hash.digest('hex');
+  assert.equal(got, HASH_2D, `the 2D bits changed: if that is meant, store ${got} as HASH_2D`);
 });

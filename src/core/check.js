@@ -70,6 +70,27 @@ export function positive(caller, name, value) {
   return value;
 }
 
+/** Two finite numbers, copied out: `vec3` for a flat world. */
+export function vec2(caller, name, value) {
+  if (!arrayOf(value, 2) || !isNumber(value[0]) || !isNumber(value[1])) {
+    fail(caller, `${name} must be 2 finite numbers, got ${show(value)}`);
+  }
+  return [value[0], value[1]];
+}
+
+/** A setter's (x, y), each a finite number. */
+export function xy(caller, x, y) {
+  if (!isNumber(x) || !isNumber(y)) fail(caller, `x and y must be finite numbers, got ${show([x, y])}`);
+  return [x, y];
+}
+
+export function positive2(caller, name, value) {
+  if (!arrayOf(value, 2) || !(isNumber(value[0]) && value[0] > 0) || !(isNumber(value[1]) && value[1] > 0)) {
+    fail(caller, `${name} must be 2 positive numbers, got ${show(value)}`);
+  }
+  return [value[0], value[1]];
+}
+
 /** Three finite numbers, copied out, so a caller's array can change later without reaching in. */
 export function vec3(caller, name, value) {
   if (!arrayOf(value, 3) || !isNumber(value[0]) || !isNumber(value[1]) || !isNumber(value[2])) {

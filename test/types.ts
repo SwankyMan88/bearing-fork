@@ -3,6 +3,8 @@
 // Each @ts-expect-error is a mistake the types must refuse; tsc fails if one is let through.
 
 import { World, Body, Joint, readGlb } from '../src/bearing.js';
+import { World2D, Body2D } from '../src/2d/bearing2d.js';
+import type { BodyInfo2D, Vec2 } from '../src/2d/bearing2d.js';
 import type { BodyOptions, BodyInfo, JointOptions, JointInfo, Vec3, ShapeType, SavedWorld } from '../src/bearing.js';
 
 export function examples(): void {
@@ -253,4 +255,23 @@ export function joints(): void {
   world.addJoint({ type: 'fixed', a: door, min: 0 });
   // @ts-expect-error ids are read only
   hinge.id = 3;
+}
+
+{
+  const flat = new World2D({ gravity: [0, 980], substeps: 8 });
+  const shard: Body2D = flat.addBody({ shape: 'polygon', vertices: new Float32Array([0, 0, 6, 1, 4, 5]), position: [320, 96], angle: 0.3 });
+  flat.addBody({ shape: 'compound', parts: [{ size: [12, 4], position: [6, 2] }, { shape: 'circle', radius: 3, density: 0.4 }] });
+  flat.addBody({ type: 'kinematic', lockPosition: [false, true], lockRotation: true, inertia: null, centerOfMass: null });
+  const read: BodyInfo2D = flat.bodyOf(shard);
+  const at: Vec2 = read.position;
+  const [x, y] = shard.position;
+  const angle: number = shard.angle + shard.angularVelocity + shard.inertia + x + y + at[0];
+  shard.setPosition(1, 2).setAngle(angle).setVelocity(3, 4).setAngularVelocity(5).moveTo([1, 2], null, 1 / 60).moveTo(at, 2, 1 / 60);
+  shard.applyForce([1, 2], [3, 4]).applyTorque(1).applyImpulse([1, 2]).applyAngularImpulse(1);
+  const t: Float32Array = flat.transforms;
+  flat.gravity = [0, 0];
+  flat.setBody(shard, { friction: t[0] });
+  flat.remove(flat.body(shard.id));
+  flat.step(1 / 60);
+  flat.destroy();
 }

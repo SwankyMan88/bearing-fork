@@ -7,6 +7,12 @@ All notable changes to Bearing are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **A 2D module, under way.** `bearing-physics/2d`: `World2D` and `Body2D`, in pixels with y down as
+  Winding's 2D view has it, and box, circle, capsule, polygon and compound bodies that weigh, move,
+  turn and take forces. They don't collide yet. See [the 2D reference](docs/API-2D.md).
+
 ## [1.2.0] - 2026-11-03
 
 Joints and characters closer to what the games ask of them. A ball joint's cone can be an

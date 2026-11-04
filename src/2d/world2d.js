@@ -1,0 +1,792 @@
+// World2D: bodies in a plane, in typed-array columns, as World is in 3D.
+//
+// A 2D module of its own, not 3D with an axis left out (rule 106). A turn is
+// one angle, inertia one number, friction one row, and a pair of bodies touches
+// at two points at most, so a hot loop written for 2D does less than half the
+// work of the 3D one with the third axis zeroed. It shares `core/`, and its
+// API's shape: one that knows World knows this.
+//
+// UNITS are Winding's 2D view's: a unit is a CSS pixel, y points down, and a
+// positive angle turns clockwise on the screen. 100 px to the metre is a
+// convention, Godot's, and it sets the two defaults that have a unit in them:
+// gravity, 9.8 m/s² as 980 px/s², and density, water's 1000 kg/m³ over a slab
+// 1 m deep as 0.1 kg/px². Nothing else has a unit, since every tolerance
+// follows the size of the bodies, so metres with y up are a matter of setting
+// those two.
+//
+// ROTATION is kept as its cosine and sine, and turned in the step with exact
+// operations alone, so the step needs no sine (the rule: bit-identical on
+// every machine). `_angle` keeps the angle itself, unwrapped, for `transforms`,
+// so that a wheel's goes on counting and `previous` to `transforms` is always
+// the short way a renderer can interpolate.
+//
+// The step works from the centre of mass, as the 3D step does: `_position` is
+// the centre of mass, and `_offset` where that is from the body's origin in
+// its own frame. The API reads and writes the origin.
+
+import {
+  fail, show, finite, positive, vec2, xy, positive2, oneOf, options, known, readOnly, handle,
+} from '../core/check.js';
+import { atan2, cos, sin } from '../core/math.js';
+import { Slots, resized, MAX_ID, MAX_SLOTS } from '../core/slots.js';
+import { Body2D } from './body2d.js';
+import { compound, convexHull, plain } from './shapes2d.js';
+
+const WORLD_OPTIONS = ['gravity', 'substeps'];
+const BODY_OPTIONS = [
+  'type', 'shape', 'size', 'radius', 'height', 'vertices', 'parts',
+  'density', 'mass', 'inertia', 'centerOfMass',
+  'friction', 'restitution', 'damping', 'angularDamping', 'gravityScale',
+  'lockRotation', 'lockPosition',
+  'position', 'angle', 'velocity', 'angularVelocity',
+];
+const PART_OPTIONS = ['shape', 'size', 'radius', 'height', 'vertices', 'position', 'angle', 'density'];
+const TYPES = ['dynamic', 'static', 'kinematic'];
+const SHAPES = ['box', 'circle', 'capsule', 'polygon', 'compound'];
+const PART_SHAPES = ['box', 'circle', 'capsule', 'polygon'];
+const DYNAMIC = 0, STATIC = 1, CIRCLE = 1;
+
+/** Which sizes each shape takes, so `a circle has no size` can be said. */
+const SIZES = { box: ['size'], circle: ['radius'], capsule: ['radius', 'height'], polygon: ['vertices'], compound: ['parts'] };
+const ALL_SIZES = ['size', 'radius', 'height', 'vertices', 'parts'];
+
+// 9.8 m/s² at 100 px to the metre, y down; see the top of this file.
+const GRAVITY = [0, 980];
+// 8, measured for 3D (world.js, SUBSTEPS); step 2 of the plan measures it here.
+const SUBSTEPS = 8;
+// The most a body other than a circle turns in a step, as in 3D (world.js, SPIN).
+const SPIN = Math.PI;
+
+const DEFAULTS = Object.freeze({
+  // A 1 m box, at 100 px to the metre, as 3D's default is a 1 m cube.
+  type: 'dynamic', shape: 'box', size: [100, 100], radius: 50, height: 200, vertices: null, parts: null,
+  density: 0.1, mass: 0, massGiven: false, inertia: 0, inertiaGiven: false, centerOfMass: null,
+  friction: 0.5, restitution: 0, damping: 0, angularDamping: 0, gravityScale: 1,
+  lockRotation: false, lockPosition: [false, false],
+  position: [0, 0], angle: 0, velocity: [0, 0], angularVelocity: 0,
+});
+
+/** Every per-slot column: name, array type, numbers per slot. */
+const COLUMNS = [
+  ['_position', Float64Array, 2],    // of the centre of mass, px
+  ['_rotation', Float64Array, 2],    // cos, sin
+  ['_angle', Float64Array, 1],       // the same turn as a number, unwrapped
+  ['_startTurn', Float64Array, 2],   // cos, sin as the step began: scratch, for _angle
+  ['_velocity', Float64Array, 2],
+  ['_angular', Float64Array, 1],
+  ['_offset', Float64Array, 2],      // the centre of mass from the origin, in the body's frame
+  ['_com', Float64Array, 2],         // centerOfMass as given
+  ['_comGiven', Uint8Array, 1],
+  ['_dims', Float64Array, 3],        // a box's width, height; a circle's or capsule's radius, height
+  ['_shape', Uint8Array, 1],
+  ['_type', Uint8Array, 1],
+  ['_mass', Float64Array, 1],
+  ['_massGiven', Uint8Array, 1],
+  ['_density', Float64Array, 1],
+  ['_inertia', Float64Array, 1],
+  ['_inertiaGiven', Uint8Array, 1],
+  ['_invMass', Float64Array, 1],     // 0 for anything but a dynamic body
+  ['_invInertia', Float64Array, 1],  // and 0 too for one locked from turning
+  ['_force', Float64Array, 2],
+  ['_torque', Float64Array, 1],
+  ['_forced', Uint8Array, 1],        // on _forcedSlots
+  ['_friction', Float64Array, 1],
+  ['_restitution', Float64Array, 1],
+  ['_damping', Float64Array, 1],
+  ['_angularDamping', Float64Array, 1],
+  ['_gravityScale', Float64Array, 1],
+  ['_lockRotation', Uint8Array, 1],
+  ['_lockMove', Uint8Array, 1],      // bit 0: never moves along x; bit 1: along y
+  ['_inAwake', Int32Array, 1],       // 1 + its place in _awakeList, or 0
+  ['_awakeList', Int32Array, 1],
+  ['_transforms', Float32Array, 3],
+  ['_previous', Float32Array, 3],
+];
+
+const POSE = new Float64Array(3);
+
+export class World2D {
+  constructor(options_) {
+    const o = options('World2D', options_);
+    known('World2D', o, WORLD_OPTIONS);
+    this._gravity = o.gravity === undefined ? [...GRAVITY] : vec2('World2D', 'gravity', o.gravity);
+    this._substeps = o.substeps === undefined ? SUBSTEPS : whole('World2D', 'substeps', o.substeps);
+    this._slots = new Slots();
+    // Every column named first, then made: an object given more than a dozen
+    // fields by computed name becomes a dictionary (world.js, FAST PROPERTIES).
+    this._position = null; this._rotation = null; this._angle = null; this._startTurn = null;
+    this._velocity = null; this._angular = null; this._offset = null; this._com = null;
+    this._comGiven = null; this._dims = null; this._shape = null; this._type = null;
+    this._mass = null; this._massGiven = null; this._density = null; this._inertia = null;
+    this._inertiaGiven = null; this._invMass = null; this._invInertia = null; this._force = null;
+    this._torque = null; this._forced = null; this._friction = null; this._restitution = null;
+    this._damping = null; this._angularDamping = null; this._gravityScale = null;
+    this._lockRotation = null; this._lockMove = null; this._inAwake = null; this._awakeList = null;
+    this._transforms = null; this._previous = null;
+    for (const [name, Type] of COLUMNS) this[name] = new Type(0);
+    /** By slot: a polygon's corners, or a compound's parts, as given in option form; else null. */
+    this._geometry = [];
+    /** Slots with a force or torque waiting: a step with none applied looks at nothing (rule 28). */
+    this._forcedSlots = [];
+    this._awakeCount = 0;
+    this._lockMoveCount = 0;
+    this._stepCount = 0;
+    this._destroyed = false;
+  }
+
+  // ---- settings and state ----
+
+  /** How many smaller steps each step is solved in. */
+  get substeps() {
+    this._live('world.substeps');
+    return this._substeps;
+  }
+
+  set substeps(value) {
+    this._live('world.substeps');
+    this._substeps = whole(null, 'world.substeps', value);
+  }
+
+  /** px/s². A copy; assign a new value to change it. */
+  get gravity() {
+    this._live('world.gravity');
+    return Object.freeze([...this._gravity]);
+  }
+
+  set gravity(value) {
+    this._live('world.gravity');
+    this._gravity = vec2(null, 'world.gravity', value);
+  }
+
+  get stepCount() {
+    this._live('world.stepCount');
+    return this._stepCount;
+  }
+
+  set stepCount(_) { readOnly('world.stepCount'); }
+
+  get bodyCount() {
+    this._live('world.bodyCount');
+    return this._slots.count;
+  }
+
+  set bodyCount(_) { readOnly('world.bodyCount'); }
+
+  get transforms() {
+    this._live('world.transforms');
+    return this._transforms;
+  }
+
+  set transforms(_) { readOnly('world.transforms'); }
+
+  get previous() {
+    this._live('world.previous');
+    return this._previous;
+  }
+
+  set previous(_) { readOnly('world.previous'); }
+
+  // ---- bodies ----
+
+  addBody(options_) {
+    this._live('addBody');
+    const spec = resolve('addBody', DEFAULTS, options('addBody', options_));
+    let s = this._slots.take();
+    if (s < 0) {
+      this._grow('addBody');
+      s = this._slots.take();
+    }
+    this._write(s, spec);
+    if (this._type[s] !== STATIC) this._awaken(s);
+    return new Body2D(this, this._slots.id(s));
+  }
+
+  setBody(body, changes) {
+    const s = this._slotOfBody('setBody', body);
+    const spec = resolve('setBody', this._spec(s), options('setBody', changes, 'changes'));
+    this._write(s, spec);
+    if (this._type[s] === STATIC) this._unawaken(s);
+    else this._awaken(s);
+  }
+
+  bodyOf(body) {
+    const s = this._slotOfBody('bodyOf', body);
+    const spec = this._spec(s), out = { type: spec.type, shape: spec.shape };
+    for (const k of SIZES[spec.shape]) out[k] = k === 'size' || k === 'vertices' ? [...spec[k]] : k === 'parts' ? spec.parts.map(copyPart) : spec[k];
+    if (spec.massGiven) out.mass = spec.mass;
+    else out.density = spec.density;
+    // Not given reads back as null, which setBody and addBody take as "work it out".
+    out.inertia = spec.inertiaGiven ? spec.inertia : null;
+    out.centerOfMass = spec.centerOfMass === null ? null : [...spec.centerOfMass];
+    out.friction = spec.friction; out.restitution = spec.restitution;
+    out.damping = spec.damping; out.angularDamping = spec.angularDamping; out.gravityScale = spec.gravityScale;
+    out.lockRotation = spec.lockRotation;
+    out.lockPosition = [...spec.lockPosition];
+    out.position = [...spec.position];
+    out.angle = spec.angle;
+    if (spec.type !== 'static') {
+      out.velocity = [...spec.velocity];
+      out.angularVelocity = spec.angularVelocity;
+    }
+    return out;
+  }
+
+  /** Takes a body out. Removing one already gone does nothing, as in Winding. */
+  remove(handle_) {
+    this._remove('remove', handle_);
+  }
+
+  /** A handle for a body's id. Doesn't check the body is alive. */
+  body(id) {
+    this._live('body');
+    if (!Number.isInteger(id) || id < 0 || id > MAX_ID) fail('body', `id must be a whole number from 0 to ${MAX_ID}, got ${show(id)}`);
+    return new Body2D(this, id);
+  }
+
+  /** Moves the world on by `dt` seconds, exactly. */
+  step(dt) {
+    this._live('step');
+    if (typeof dt !== 'number' || !(dt > 0) || dt === Infinity) fail('step', `dt must be a positive number of seconds, got ${show(dt)}`);
+    this._stepCount++;
+    if (this._forcedSlots.length > 0) this._applyForces(dt);
+    const list = this._awakeList, tr = this._transforms, prev = this._previous, r = this._rotation, turn = this._startTurn;
+    for (let i = 0; i < this._awakeCount; i++) {
+      const s = list[i], t3 = 3 * s, s2 = 2 * s;
+      prev[t3] = tr[t3]; prev[t3 + 1] = tr[t3 + 1]; prev[t3 + 2] = tr[t3 + 2];
+      turn[s2] = r[s2]; turn[s2 + 1] = r[s2 + 1];
+    }
+    const substeps = this._substeps, h = dt / substeps, pins = this._lockMoveCount > 0;
+    for (let sub = 0; sub < substeps; sub++) {
+      this._accelerate(h, dt);
+      if (pins) this._pin();
+      this._move(h);
+    }
+    const angle = this._angle;
+    for (let i = 0; i < this._awakeCount; i++) {
+      const s = list[i], s2 = 2 * s, c = r[s2], z = r[s2 + 1], c0 = turn[s2], z0 = turn[s2 + 1];
+      // The step's turn as an angle: the spin cap keeps it under half a turn,
+      // but for a circle, whose `angle` may lose whole turns at such speeds.
+      if (c !== c0 || z !== z0) angle[s] += atan2(z * c0 - c * z0, c * c0 + z * z0);
+      this._place(s);
+    }
+  }
+
+  /** Lets go of everything. Using the world afterwards throws; calling this again does nothing. */
+  destroy() {
+    if (this._destroyed) return;
+    this._destroyed = true;
+    this._slots = new Slots();
+    for (const [name, Type] of COLUMNS) this[name] = new Type(0);
+    this._geometry = [];
+    this._forcedSlots = [];
+    this._awakeCount = 0;
+    this._lockMoveCount = 0;
+  }
+
+  // ---- what Body2D calls (public, but not for users: see test/2d-docs.test.js) ----
+
+  _live(caller) {
+    if (this._destroyed) fail(caller, 'this world was destroyed');
+  }
+
+  /** The slot of a live id, after checking the world; throws naming `caller` otherwise. */
+  _slotOf(caller, id) {
+    this._live(caller);
+    const s = this._slots.slotOf(id);
+    if (s < 0) fail(caller, 'this body was removed');
+    return s;
+  }
+
+  _alive(id) {
+    return !this._destroyed && this._slots.slotOf(id) >= 0;
+  }
+
+  /** A slot's two numbers in `column`, as a frozen copy. */
+  _vector(caller, id, column) {
+    const s = this._slotOf(caller, id);
+    return Object.freeze([column[2 * s], column[2 * s + 1]]);
+  }
+
+  _massOf(caller, id) {
+    return this._mass[this._slotOf(caller, id)];
+  }
+
+  _inertiaOf(caller, id) {
+    return this._inertia[this._slotOf(caller, id)];
+  }
+
+  _angleOf(caller, id) {
+    return this._angle[this._slotOf(caller, id)];
+  }
+
+  _spinOf(caller, id) {
+    return this._angular[this._slotOf(caller, id)];
+  }
+
+  _poseOf(caller, id) {
+    this._pose(this._slotOf(caller, id));
+    return Object.freeze([POSE[0], POSE[1]]);
+  }
+
+  _setPosition(caller, id, x, y) {
+    const s = this._slotOf(caller, id), at = xy(caller, x, y);
+    this._pose(s);
+    this._put(s, at[0], at[1], POSE[2]);
+    this._place(s);
+    this._settled(s);
+  }
+
+  _setAngle(caller, id, radians) {
+    const s = this._slotOf(caller, id);
+    this._pose(s);
+    this._put(s, POSE[0], POSE[1], radians);
+    this._place(s);
+    this._settled(s);
+  }
+
+  _setVelocity(caller, id, x, y) {
+    const s = this._slotOf(caller, id), v = xy(caller, x, y);
+    if (this._type[s] === STATIC) fail(caller, 'a static body has no velocity');
+    this._velocity[2 * s] = v[0]; this._velocity[2 * s + 1] = v[1];
+    this._pinned(s);
+  }
+
+  _setSpin(caller, id, radians) {
+    const s = this._slotOf(caller, id);
+    finite(caller, 'radians', radians);
+    if (this._type[s] === STATIC) fail(caller, 'a static body has no angularVelocity');
+    if (this._lockRotation[s] === 0) this._angular[s] = radians;
+  }
+
+  /**
+   * body.moveTo: the velocities that take its origin to `position`, turned to
+   * `angle`, the short way round, over a step of dt. A substep turns by
+   * 2 atan(ω h / 2) (_move), so the spin is sized to that, and a kinematic
+   * body lands on the pose to rounding, as in 3D.
+   */
+  _moveTo(caller, id, position, angle, dt) {
+    const s = this._slotOf(caller, id), at = vec2(caller, 'position', position);
+    if (angle !== null && angle !== undefined) finite(caller, 'angle', angle);
+    if (typeof dt !== 'number' || !(dt > 0) || dt === Infinity) fail(caller, `dt must be a positive number, got ${show(dt)}`);
+    if (this._type[s] === STATIC) fail(caller, 'a static body has no velocity');
+    const s2 = 2 * s, c = this._rotation[s2], z = this._rotation[s2 + 1];
+    let tc = c, tz = z;
+    if (angle !== null && angle !== undefined) { tc = cos(angle); tz = sin(angle); }
+    const ox = this._offset[s2], oy = this._offset[s2 + 1];
+    this._velocity[s2] = (at[0] + tc * ox - tz * oy - this._position[s2]) / dt;
+    this._velocity[s2 + 1] = (at[1] + tz * ox + tc * oy - this._position[s2 + 1]) / dt;
+    this._pinned(s);
+    const half = atan2(tz * c - tc * z, tc * c + tz * z) * 0.5 / this._substeps, h = dt / this._substeps;
+    if (this._lockRotation[s] === 0) this._angular[s] = 2 * sin(half) / (cos(half) * h);
+  }
+
+  // Forces and impulses. Each checks its arguments whatever the body's type,
+  // then does nothing to a static or kinematic body: those act as infinitely
+  // heavy, as in 3D, so an explosion can push everything near it unasked.
+
+  _applyForce(caller, id, force, point) {
+    const s = this._slotOf(caller, id), f = vec2(caller, 'force', force);
+    const at = point === undefined ? null : vec2(caller, 'point', point);
+    if (this._type[s] !== DYNAMIC) return;
+    const s2 = 2 * s;
+    this._force[s2] += f[0]; this._force[s2 + 1] += f[1];
+    if (at) this._torque[s] += (at[0] - this._position[s2]) * f[1] - (at[1] - this._position[s2 + 1]) * f[0];
+    this._queue(s);
+  }
+
+  _applyTorque(caller, id, torque) {
+    const s = this._slotOf(caller, id);
+    finite(caller, 'torque', torque);
+    if (this._type[s] !== DYNAMIC) return;
+    this._torque[s] += torque;
+    this._queue(s);
+  }
+
+  _applyImpulse(caller, id, impulse, point) {
+    const s = this._slotOf(caller, id), j = vec2(caller, 'impulse', impulse);
+    const at = point === undefined ? null : vec2(caller, 'point', point);
+    if (this._type[s] !== DYNAMIC) return;
+    const s2 = 2 * s, m = this._invMass[s];
+    this._velocity[s2] += j[0] * m; this._velocity[s2 + 1] += j[1] * m;
+    this._pinned(s);
+    if (at) this._angular[s] += this._invInertia[s] * ((at[0] - this._position[s2]) * j[1] - (at[1] - this._position[s2 + 1]) * j[0]);
+  }
+
+  _applyAngularImpulse(caller, id, impulse) {
+    const s = this._slotOf(caller, id);
+    finite(caller, 'impulse', impulse);
+    if (this._type[s] !== DYNAMIC) return;
+    this._angular[s] += this._invInertia[s] * impulse;
+  }
+
+  _queue(s) {
+    if (this._forced[s] === 0) {
+      this._forced[s] = 1;
+      this._forcedSlots.push(s);
+    }
+  }
+
+  _remove(caller, body) {
+    this._live(caller);
+    if (!(body instanceof Body2D)) fail(caller, `handle must be a Body2D, got ${show(body)}`);
+    const s = handle(caller, 'handle', body, this, Body2D, this._slots, true);
+    if (s < 0) return;
+    // A force waiting on this slot must not land on whichever body gets it next.
+    this._forced[s] = 0;
+    this._force[2 * s] = 0; this._force[2 * s + 1] = 0; this._torque[s] = 0;
+    this._geometry[s] = null;
+    if (this._lockMove[s] !== 0) { this._lockMove[s] = 0; this._lockMoveCount--; }
+    this._unawaken(s);
+    this._slots.release(s);
+    // Shrunk by the 1/4 rule, as in 3D (world.js _remove).
+    const top = this._slots.top;
+    if (top <= this._slots.capacity / 4) {
+      let capacity = top === 0 ? 0 : 1;
+      while (capacity < top) capacity *= 2;
+      this._resize(capacity);
+    }
+  }
+
+  // ---- inside ----
+
+  _slotOfBody(caller, body) {
+    this._live(caller);
+    return handle(caller, 'body', body, this, Body2D, this._slots);
+  }
+
+  _grow(caller) {
+    const slots = this._slots;
+    // slots.limit is MAX_SLOTS except in a test, which lowers it to reach this.
+    if (slots.capacity >= slots.limit) {
+      fail(caller, `a world holds at most ${MAX_SLOTS} bodies (the slot field of an id is 24 bits)`);
+    }
+    this._resize(Math.min(Math.max(slots.capacity * 2, 1), slots.limit));
+  }
+
+  _resize(capacity) {
+    this._slots.resize(capacity);
+    for (const [name, , per] of COLUMNS) this[name] = resized(this[name], capacity * per);
+    const had = this._geometry.length;
+    this._geometry.length = capacity;
+    for (let s = had; s < capacity; s++) this._geometry[s] = null;
+  }
+
+  _awaken(s) {
+    if (this._inAwake[s] !== 0) return;
+    this._awakeList[this._awakeCount] = s;
+    this._inAwake[s] = ++this._awakeCount;
+  }
+
+  _unawaken(s) {
+    const i = this._inAwake[s] - 1;
+    if (i < 0) return;
+    const last = this._awakeList[--this._awakeCount];
+    this._awakeList[i] = last;
+    this._inAwake[last] = i + 1;
+    this._inAwake[s] = 0;
+  }
+
+  /** Slot s's origin and angle as the API has them, into POSE. */
+  _pose(s) {
+    const s2 = 2 * s, c = this._rotation[s2], z = this._rotation[s2 + 1], ox = this._offset[s2], oy = this._offset[s2 + 1];
+    POSE[0] = this._position[s2] - (c * ox - z * oy);
+    POSE[1] = this._position[s2 + 1] - (z * ox + c * oy);
+    POSE[2] = this._angle[s];
+  }
+
+  /** Slot s with its origin at (x, y), turned by `angle`: the inverse of _pose. */
+  _put(s, x, y, angle) {
+    const s2 = 2 * s, c = cos(angle), z = sin(angle), ox = this._offset[s2], oy = this._offset[s2 + 1];
+    this._rotation[s2] = c; this._rotation[s2 + 1] = z;
+    this._angle[s] = angle;
+    this._position[s2] = x + c * ox - z * oy;
+    this._position[s2 + 1] = y + z * ox + c * oy;
+  }
+
+  /** Copies a slot's pose out to `transforms`. */
+  _place(s) {
+    const t3 = 3 * s, tr = this._transforms;
+    this._pose(s);
+    tr[t3] = POSE[0]; tr[t3 + 1] = POSE[1]; tr[t3 + 2] = POSE[2];
+  }
+
+  /** After a teleport: `previous` goes with it, so a renderer doesn't draw it sliding across. */
+  _settled(s) {
+    const t3 = 3 * s, tr = this._transforms, prev = this._previous;
+    prev[t3] = tr[t3]; prev[t3 + 1] = tr[t3 + 1]; prev[t3 + 2] = tr[t3 + 2];
+  }
+
+  /** A slot's full description, in option form, with the position as `_pose` reads it. */
+  _spec(s) {
+    const shape = SHAPES[this._shape[s]], d = this._dims, s2 = 2 * s, s3 = 3 * s;
+    this._pose(s);
+    const g = this._geometry[s];
+    return {
+      type: TYPES[this._type[s]], shape,
+      size: shape === 'box' ? [d[s3], d[s3 + 1]] : [...DEFAULTS.size],
+      radius: shape === 'circle' || shape === 'capsule' ? d[s3] : DEFAULTS.radius,
+      height: shape === 'capsule' ? d[s3 + 1] : DEFAULTS.height,
+      vertices: shape === 'polygon' ? g : null, parts: shape === 'compound' ? g : null,
+      density: this._density[s], mass: this._mass[s], massGiven: this._massGiven[s] === 1,
+      inertia: this._inertia[s], inertiaGiven: this._inertiaGiven[s] === 1,
+      centerOfMass: this._comGiven[s] === 1 ? [this._com[s2], this._com[s2 + 1]] : null,
+      friction: this._friction[s], restitution: this._restitution[s], damping: this._damping[s],
+      angularDamping: this._angularDamping[s], gravityScale: this._gravityScale[s],
+      lockRotation: this._lockRotation[s] === 1,
+      lockPosition: [(this._lockMove[s] & 1) !== 0, (this._lockMove[s] & 2) !== 0],
+      position: [POSE[0], POSE[1]], angle: POSE[2],
+      velocity: [this._velocity[s2], this._velocity[s2 + 1]], angularVelocity: this._angular[s],
+    };
+  }
+
+  /** Writes a checked description into slot s's columns. */
+  _write(s, spec) {
+    const s2 = 2 * s, s3 = 3 * s, d = this._dims;
+    this._type[s] = TYPES.indexOf(spec.type);
+    this._shape[s] = SHAPES.indexOf(spec.shape);
+    this._geometry[s] = spec.shape === 'polygon' ? spec.vertices : spec.shape === 'compound' ? spec.parts : null;
+    d[s3] = spec.shape === 'box' ? spec.size[0] : spec.radius;
+    d[s3 + 1] = spec.shape === 'box' ? spec.size[1] : spec.height;
+    this._density[s] = spec.density;
+    this._massGiven[s] = spec.massGiven ? 1 : 0;
+    // Worked out at a density of 1 for a plain shape; a compound's parts have
+    // densities of their own, so its mass is worked out as a whole, and scaled
+    // to a mass given.
+    let mass, moment, cx, cy;
+    if (spec.shape === 'compound') {
+      const m = compound(spec.parts, spec.density);
+      mass = spec.massGiven ? spec.mass : m.mass;
+      moment = m.moment * (mass / m.mass);
+      cx = m.x; cy = m.y;
+    } else {
+      const m = plain(spec.shape, spec.size, spec.radius, spec.height, spec.vertices);
+      mass = spec.massGiven ? spec.mass : m.area * spec.density;
+      moment = m.moment * (mass / m.area);
+      cx = m.x; cy = m.y;
+    }
+    this._mass[s] = mass;
+    this._inertiaGiven[s] = spec.inertiaGiven ? 1 : 0;
+    this._inertia[s] = spec.inertiaGiven ? spec.inertia : moment;
+    // A centre of mass given moves where the body turns about, and keeps the
+    // shape's own inertia, as in 3D.
+    this._comGiven[s] = spec.centerOfMass === null ? 0 : 1;
+    if (spec.centerOfMass !== null) { cx = spec.centerOfMass[0]; cy = spec.centerOfMass[1]; this._com[s2] = cx; this._com[s2 + 1] = cy; }
+    this._offset[s2] = cx; this._offset[s2 + 1] = cy;
+    const moves = spec.type === 'dynamic';
+    this._invMass[s] = moves ? 1 / mass : 0;
+    this._invInertia[s] = moves && !spec.lockRotation ? 1 / this._inertia[s] : 0;
+    this._friction[s] = spec.friction; this._restitution[s] = spec.restitution;
+    this._damping[s] = spec.damping; this._angularDamping[s] = spec.angularDamping;
+    this._gravityScale[s] = spec.gravityScale;
+    this._lockRotation[s] = spec.lockRotation ? 1 : 0;
+    const held = (spec.lockPosition[0] ? 1 : 0) | (spec.lockPosition[1] ? 2 : 0);
+    this._lockMoveCount += (held !== 0 ? 1 : 0) - (this._lockMove[s] !== 0 ? 1 : 0);
+    this._lockMove[s] = held;
+    this._put(s, spec.position[0], spec.position[1], spec.angle);
+    const still = spec.type === 'static';
+    this._velocity[s2] = still ? 0 : spec.velocity[0]; this._velocity[s2 + 1] = still ? 0 : spec.velocity[1];
+    this._angular[s] = still || spec.lockRotation ? 0 : spec.angularVelocity;
+    this._pinned(s);
+    this._place(s);
+    this._settled(s);
+  }
+
+  _applyForces(dt) {
+    const list = this._forcedSlots, forced = this._forced, f = this._force, t = this._torque;
+    const v = this._velocity, w = this._angular, im = this._invMass, ii = this._invInertia;
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      if (forced[s] === 0) continue;   // removed since, or a repeat
+      forced[s] = 0;
+      const s2 = 2 * s;
+      // Made static or kinematic since: im and ii are 0, and it goes with the step.
+      v[s2] += f[s2] * dt * im[s]; v[s2 + 1] += f[s2 + 1] * dt * im[s];
+      w[s] += t[s] * dt * ii[s];
+      f[s2] = 0; f[s2 + 1] = 0; t[s] = 0;
+    }
+    list.length = 0;
+  }
+
+  /** Gravity and damping on dynamic bodies, and the spin cap, as each substep starts. */
+  _accelerate(h, dt) {
+    const list = this._awakeList, n = this._awakeCount, type = this._type, shape = this._shape;
+    const v = this._velocity, w = this._angular, scale = this._gravityScale;
+    const damping = this._damping, angularDamping = this._angularDamping;
+    const gx = this._gravity[0] * h, gy = this._gravity[1] * h, most = SPIN / dt;
+    for (let i = 0; i < n; i++) {
+      const s = list[i];
+      if (type[s] !== DYNAMIC) continue;
+      const s2 = 2 * s, g = scale[s];
+      v[s2] += gx * g; v[s2 + 1] += gy * g;
+      // dv/dt = -c v, taken implicitly, as in 3D: exact operations, and never past zero.
+      if (damping[s] !== 0) {
+        const k = 1 / (1 + h * damping[s]);
+        v[s2] *= k; v[s2 + 1] *= k;
+      }
+      if (angularDamping[s] !== 0) w[s] /= 1 + h * angularDamping[s];
+      if (shape[s] !== CIRCLE) {
+        if (w[s] > most) w[s] = most;
+        else if (w[s] < -most) w[s] = -most;
+      }
+    }
+  }
+
+  /**
+   * Position from the new velocity, and the turn. (cos, sin) is carried on by
+   * the turn whose half-angle tangent is t = ω h / 2: cos (1 - t²)/(1 + t²),
+   * sin 2t/(1 + t²), exact operations alone. That is a turn of 2 atan(ω h / 2)
+   * rather than ω h, short by (ω h)²/12 of itself, the same turn the 3D step's
+   * quaternion update makes. Back to unit length after, against rounding.
+   */
+  _move(h) {
+    const list = this._awakeList, n = this._awakeCount, half = h * 0.5;
+    const p = this._position, r = this._rotation, v = this._velocity, w = this._angular;
+    for (let i = 0; i < n; i++) {
+      const s = list[i], s2 = 2 * s;
+      p[s2] += v[s2] * h; p[s2 + 1] += v[s2 + 1] * h;
+      if (w[s] === 0) continue;
+      const t = w[s] * half, k = 1 / (1 + t * t), tc = (1 - t * t) * k, tz = 2 * t * k;
+      const c = r[s2] * tc - r[s2 + 1] * tz, z = r[s2 + 1] * tc + r[s2] * tz, l = 1 / Math.sqrt(c * c + z * z);
+      r[s2] = c * l; r[s2 + 1] = z * l;
+    }
+  }
+
+  /** Every awake body's speed along its locked axes back to 0: as lockPosition holds in 3D (world.js _pin). */
+  _pin() {
+    const list = this._awakeList, lock = this._lockMove, v = this._velocity;
+    for (let i = 0; i < this._awakeCount; i++) {
+      const s = list[i], l = lock[s];
+      if (l === 0) continue;
+      if ((l & 1) !== 0) v[2 * s] = 0;
+      if ((l & 2) !== 0) v[2 * s + 1] = 0;
+    }
+  }
+
+  _pinned(s) {
+    const l = this._lockMove[s];
+    if ((l & 1) !== 0) this._velocity[2 * s] = 0;
+    if ((l & 2) !== 0) this._velocity[2 * s + 1] = 0;
+  }
+}
+
+function whole(caller, name, value) {
+  if (!Number.isInteger(value) || value < 1) fail(caller, `${name} must be a whole number, 1 or more, got ${show(value)}`);
+  return value;
+}
+
+const atLeastZero = (caller, name, value) => {
+  if (typeof value !== 'number' || !(value >= 0) || value === Infinity) fail(caller, `${name} must be 0 or more, got ${show(value)}`);
+  return value;
+};
+
+const flag = (caller, name, value) => {
+  if (typeof value !== 'boolean') fail(caller, `${name} must be true or false, got ${show(value)}`);
+  return value;
+};
+
+const copyPart = (p) => {
+  const out = { shape: p.shape };
+  for (const k of SIZES[p.shape]) out[k] = Array.isArray(p[k]) ? [...p[k]] : p[k];
+  out.position = [...p.position];
+  out.angle = p.angle;
+  if (p.density !== undefined) out.density = p.density;
+  return out;
+};
+
+/** Flat corners, checked, as their convex hull. */
+function corners(caller, name, value) {
+  const ok = value !== null && typeof value === 'object' && value.length >= 2 && value.length % 2 === 0
+    && Array.prototype.every.call(value, (x) => typeof x === 'number' && Number.isFinite(x));
+  if (!ok) fail(caller, `${name} must be finite numbers, two to a vertex, got ${show(value)}`);
+  const hull = convexHull(value);
+  if (hull === null) fail(caller, `${name} must span an area (3 points not on one line), got ${show(value)}`);
+  return hull;
+}
+
+/** One sizes check, for a body or a part: `name` is how its options read in a message. */
+function sizes(caller, prefix, shape, o, base) {
+  const out = { size: base.size, radius: base.radius, height: base.height, vertices: base.vertices };
+  const has = (k) => o[k] !== undefined;
+  if (has('size')) out.size = positive2(caller, `${prefix}size`, o.size);
+  if (has('radius')) out.radius = positive(caller, `${prefix}radius`, o.radius);
+  if (has('height')) out.height = positive(caller, `${prefix}height`, o.height);
+  if (has('vertices')) out.vertices = corners(caller, `${prefix}vertices`, o.vertices);
+  if (shape === 'polygon' && out.vertices === null) out.vertices = convexHull([-50, -50, 50, -50, 50, 50, -50, 50]);
+  if (shape === 'capsule' && out.height < 2 * out.radius) fail(caller, `${prefix}height must be at least twice radius (${2 * out.radius}), got ${show(out.height)}`);
+  return out;
+}
+
+function part(caller, k, given) {
+  const name = `parts[${k}]`;
+  if (given === null || typeof given !== 'object' || Array.isArray(given)) fail(caller, `${name} must be an object, got ${show(given)}`);
+  known(`${caller}: ${name}`, given, PART_OPTIONS);
+  const shape = given.shape === undefined ? 'box' : oneOf(caller, `${name}.shape`, given.shape, PART_SHAPES);
+  for (const key of ALL_SIZES) if (key !== 'parts' && given[key] !== undefined && !SIZES[shape].includes(key)) fail(caller, `${name}: a ${shape} has no ${key}`);
+  const out = { shape, ...sizes(caller, `${name}.`, shape, given, DEFAULTS) };
+  out.position = given.position === undefined ? [0, 0] : vec2(caller, `${name}.position`, given.position);
+  out.angle = given.angle === undefined ? 0 : finite(caller, `${name}.angle`, given.angle);
+  if (given.density !== undefined) out.density = positive(caller, `${name}.density`, given.density);
+  return out;
+}
+
+/** `base` changed by the options `given`, every one checked; nothing is written. */
+function resolve(caller, base, given) {
+  known(caller, given, BODY_OPTIONS);
+  const has = (k) => given[k] !== undefined;
+  const type = has('type') ? oneOf(caller, 'type', given.type, TYPES) : base.type;
+  const shape = has('shape') ? oneOf(caller, 'shape', given.shape, SHAPES) : base.shape;
+  for (const k of ALL_SIZES) if (has(k) && !SIZES[shape].includes(k)) fail(caller, `a ${shape} has no ${k}`);
+  const { size, radius, height, vertices } = sizes(caller, '', shape, given, shape === base.shape ? base : DEFAULTS);
+  let parts = shape === base.shape ? base.parts : null;
+  if (has('parts')) {
+    if (!Array.isArray(given.parts) || given.parts.length === 0) fail(caller, `parts must be a list of one or more parts, got ${show(given.parts)}`);
+    parts = given.parts.map((p, k) => part(caller, k, p));
+  }
+  if (shape === 'compound' && parts === null) parts = [part(caller, 0, {})];
+
+  if (has('mass') && has('density')) fail(caller, 'give mass or density, not both');
+  let { density, mass, massGiven, inertia, inertiaGiven, centerOfMass } = base;
+  if (has('mass')) { mass = positive(caller, 'mass', given.mass); massGiven = true; }
+  if (has('density')) { density = positive(caller, 'density', given.density); massGiven = false; }
+  if (given.inertia === null) inertiaGiven = false;
+  else if (has('inertia')) {
+    const i = given.inertia;
+    if (typeof i !== 'number' || !(i > 0) || i === Infinity) fail(caller, `inertia must be a positive number, or null to follow the shape, got ${show(i)}`);
+    inertia = i; inertiaGiven = true;
+  }
+  if (given.centerOfMass === null) centerOfMass = null;
+  else if (has('centerOfMass')) centerOfMass = vec2(caller, 'centerOfMass', given.centerOfMass);
+
+  const friction = has('friction') ? atLeastZero(caller, 'friction', given.friction) : base.friction;
+  let restitution = base.restitution;
+  if (has('restitution')) {
+    const r = given.restitution;
+    if (typeof r !== 'number' || !(r >= 0 && r <= 1)) fail(caller, `restitution must be from 0 to 1, got ${show(r)}`);
+    restitution = r;
+  }
+  const damping = has('damping') ? atLeastZero(caller, 'damping', given.damping) : base.damping;
+  const angularDamping = has('angularDamping') ? atLeastZero(caller, 'angularDamping', given.angularDamping) : base.angularDamping;
+  const gravityScale = has('gravityScale') ? finite(caller, 'gravityScale', given.gravityScale) : base.gravityScale;
+  const lockRotation = has('lockRotation') ? flag(caller, 'lockRotation', given.lockRotation) : base.lockRotation;
+  let lockPosition = base.lockPosition;
+  if (has('lockPosition')) {
+    const l = given.lockPosition;
+    if (!(l !== null && typeof l === 'object' && l.length === 2 && typeof l[0] === 'boolean' && typeof l[1] === 'boolean')) {
+      fail(caller, `lockPosition must be 2 true or false values, got ${show(l)}`);
+    }
+    lockPosition = [l[0], l[1]];
+  }
+  const position = has('position') ? vec2(caller, 'position', given.position) : base.position;
+  const angle = has('angle') ? finite(caller, 'angle', given.angle) : base.angle;
+  if (type === 'static') {
+    if (has('velocity')) fail(caller, 'a static body has no velocity');
+    if (has('angularVelocity')) fail(caller, 'a static body has no angularVelocity');
+  }
+  const velocity = has('velocity') ? vec2(caller, 'velocity', given.velocity) : base.velocity;
+  const angularVelocity = has('angularVelocity') ? finite(caller, 'angularVelocity', given.angularVelocity) : base.angularVelocity;
+  return {
+    type, shape, size, radius, height, vertices, parts, density, mass, massGiven, inertia, inertiaGiven, centerOfMass,
+    friction, restitution, damping, angularDamping, gravityScale, lockRotation, lockPosition,
+    position, angle, velocity, angularVelocity,
+  };
+}
