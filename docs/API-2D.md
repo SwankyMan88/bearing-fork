@@ -2,7 +2,8 @@
 
 `bearing-physics/2d` is Bearing for a flat world: the same calls, options and errors as
 [the 3D reference](API.md), in pixels. This page lists every call. It grows as the 2D module does:
-for now, bodies move, turn and take forces, and don't yet touch. Collision is the next step.
+for now, boxes, circles, capsules and polygons collide, stack and roll. A compound moves and turns
+but doesn't touch anything yet, and thousands of bodies wait for the next step.
 
 ```js
 import { World2D } from 'bearing-physics/2d';
@@ -29,13 +30,15 @@ Everything in [the 3D reference's conventions](API.md#conventions) holds. These 
 
 ## Contents
 
-[World2D](#world-class) · [Body2D](#body)
+[World2D](#world-class) · [Body2D](#body) · [Contacts](#contacts)
 
 ## Index
 
 **A** &nbsp; [`world.addBody()`](#world-addbody) · [`body.alive`](#body-alive) · [`body.angle`](#body-angle) · [`body.angularVelocity`](#body-angularvelocity) · [`body.applyAngularImpulse()`](#body-applyangularimpulse) · [`body.applyForce()`](#body-applyforce) · [`body.applyImpulse()`](#body-applyimpulse) · [`body.applyTorque()`](#body-applytorque)
 
 **B** &nbsp; [Body2D](#body) · [`world.body()`](#world-body) · [`world.bodyCount`](#world-bodycount) · [`world.bodyOf()`](#world-bodyof)
+
+**C** &nbsp; [Contacts](#contacts)
 
 **D** &nbsp; [`body.destroy()`](#body-destroy) · [`world.destroy()`](#world-destroy)
 
@@ -169,8 +172,8 @@ Adds a body. Every option has a default, so `addBody()` is a 100 px box, 1 m at 
 | `mass` | from `density` | kg, instead of `density`. |
 | `inertia` | from the shape and mass | How hard it is to turn about its centre of mass, kg·px². `null` follows the shape again. |
 | `centerOfMass` | the shape's centre | Where it balances, `[x, y]`, px, in its own frame. It keeps the shape's inertia. `null` is the shape's centre again. |
-| `friction` | `0.5` | Stored for when bodies touch, 0 or more. |
-| `restitution` | `0` | Stored for when bodies touch, from 0 to 1. |
+| `friction` | `0.5` | How much it resists sliding, 0 or more: mixed with what it touches as the square root of the two, so ice is slippery against anything. |
+| `restitution` | `0` | How much of its speed it bounces back with, from 0 to 1: the larger of the two touching. |
 | `damping` | `0` | Speed lost per second, 1/s. |
 | `angularDamping` | `0` | Spin lost per second, 1/s. |
 | `gravityScale` | `1` | Multiplies the world's gravity for this body. |
@@ -528,3 +531,27 @@ Throws: `destroy: this world was destroyed`.
 ```js
 crate.destroy();
 ```
+
+<a id="contacts"></a>
+## Contacts
+
+Two bodies touch when at least one is dynamic. Every contact tolerance is a two-hundredth of the
+thinner body's thinnest width, so a 32 px box's is 0.16 px and a 4 px shard's 0.02 px, and
+nothing needs tuning for size.
+
+- **Bodies rest a little into each other.** Overlaps ease out as a stiff spring would, which is
+  what lets a stack stand. A 32 px box rests about 0.01 px deep, and the top of a stack of 10 has
+  come down 0.86 px, at any box size.
+- **Corners are tested exactly, rounded shapes by their cores.** Over 20,000 random pairs, a
+  contact reads the true gap to within one and a half tolerances.
+- **Friction stops a slide where v² / 2 μ g says:** a box at 300 px/s stops within 2 px of it.
+- **A ball rolls to rest.** A contact of one point resists rolling a little, a coefficient of 0.01
+  as in 3D: a 16 px disc rolling at 200 px/s goes about 3,060 px.
+- **A bounce stops** when it would rise no higher than the tolerance, so nothing bounces forever.
+- **A fast body stops at a surface,** by contact points found ahead of it: a 5 px ball at 5,000 px/s,
+  83 px a step, stops at a 20 px wall. This covers what is ahead of it as a step begins. Full
+  continuous collision comes later.
+- **A light body under a heavy one gives.** It settles, but sinks in as the weight above it grows,
+  as in 3D: a 40 by 20 px box on one ten times lighter sinks 0.26 px, on one 100 times lighter
+  2.4 px, and on one 1,000 times lighter it flattens through it. Keep what stands on what within
+  about 10 to 1.

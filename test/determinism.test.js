@@ -16,7 +16,7 @@ import { World2D } from '../src/2d/bearing2d.js';
 suite('determinism');
 
 const HASH = '8ba8e0f14c1a6cd6586f8476c1112a01c296555bcee6d122b013aff6e67bff5f';
-const HASH_2D = 'ace2ecaa06631b26b099c199f47e28d04d3ba54055e08414b71f5809eb036402';
+const HASH_2D = '90dd8fec9d8b6f12d89668e12b7b18458ce04af9b5a0357bd18681dee148e501';
 
 test('a world of everything steps to the stored bits', () => {
   const { world } = mixed({ workers: 0 });
@@ -41,9 +41,12 @@ test('a 2D world steps to its stored bits', () => {
   // Every shape, spun, pushed, damped, locked and driven, placed through the
   // calls that take an angle, so Bearing's own sine and cosine are in the hash.
   const world = new World2D();
+  world.addBody({ type: 'static', size: [4000, 100], position: [0, 300] });
+  world.addBody({ type: 'static', size: [100, 4000], position: [-500, 0] });
+  world.addBody({ type: 'static', size: [100, 4000], position: [500, 0] });
   const bodies = [];
   for (let k = 0; k < 40; k++) {
-    const common = { position: [k * 37.5 - 200, -k * 11.25], angle: k * 0.7, velocity: [k - 20, -3 * k], angularVelocity: 0.3 * k - 6, damping: k % 3 === 0 ? 0.2 : 0, angularDamping: k % 5 === 0 ? 0.1 : 0, lockPosition: [k % 7 === 0, false] };
+    const common = { position: [k * 37.5 - 400, -k * 11.25], angle: k * 0.7, restitution: k % 4 === 0 ? 0.6 : 0, velocity: [k - 20, -3 * k], angularVelocity: 0.3 * k - 6, damping: k % 3 === 0 ? 0.2 : 0, angularDamping: k % 5 === 0 ? 0.1 : 0, lockPosition: [k % 7 === 0, false] };
     const shape = k % 5;
     bodies.push(world.addBody(
       shape === 0 ? { ...common, size: [20 + k, 10] }

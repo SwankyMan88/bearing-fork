@@ -31,6 +31,8 @@ import { atan2, cos, sin } from '../core/math.js';
 import { Slots, resized, MAX_ID, MAX_SLOTS } from '../core/slots.js';
 import { Body2D } from './body2d.js';
 import { compound, convexHull, plain } from './shapes2d.js';
+import { Core } from './collide2d.js';
+import { Contacts2D, PIXEL, makeSoft, meet, prepare, restitution, soft, solve, warmStart } from './contact2d.js';
 
 const WORLD_OPTIONS = ['gravity', 'substeps'];
 const BODY_OPTIONS = [
@@ -56,6 +58,10 @@ const GRAVITY = [0, 980];
 const SUBSTEPS = 8;
 // The most a body other than a circle turns in a step, as in 3D (world.js, SPIN).
 const SPIN = Math.PI;
+// A contact's spring, as in 3D (world.js): an eighth of the substep rate, and
+// well past critically damped, so overlaps ease out without a bounce.
+const STIFFNESS = 1 / 8;
+const DAMPING_RATIO = 10;
 
 const DEFAULTS = Object.freeze({
   // A 1 m box, at 100 px to the metre, as 3D's default is a 1 m cube.
@@ -99,6 +105,9 @@ const COLUMNS = [
   ['_lockMove', Uint8Array, 1],      // bit 0: never moves along x; bit 1: along y
   ['_inAwake', Int32Array, 1],       // 1 + its place in _awakeList, or 0
   ['_awakeList', Int32Array, 1],
+  ['_size', Float64Array, 1],        // the shape's thinnest width, px: what its tolerances follow
+  ['_reach', Float64Array, 1],       // the furthest it reaches from its centre of mass, px
+  ['_motion', Float64Array, 1],      // how far it can move this step, px
   ['_transforms', Float32Array, 3],
   ['_previous', Float32Array, 3],
 ];
@@ -122,10 +131,18 @@ export class World2D {
     this._torque = null; this._forced = null; this._friction = null; this._restitution = null;
     this._damping = null; this._angularDamping = null; this._gravityScale = null;
     this._lockRotation = null; this._lockMove = null; this._inAwake = null; this._awakeList = null;
+    this._size = null; this._reach = null; this._motion = null;
     this._transforms = null; this._previous = null;
     for (const [name, Type] of COLUMNS) this[name] = new Type(0);
     /** By slot: a polygon's corners, or a compound's parts, as given in option form; else null. */
     this._geometry = [];
+    /** By slot: its shape as the contact code wants it (collide2d.js), or null for a compound, as yet. */
+    this._core = [];
+    /** This step's manifolds (contact2d.js). */
+    this._contacts = new Contacts2D();
+    /** What each touching pair pushed with last step, by pair, for the warm start. See _narrow. */
+    this._memory = new Map();
+    this._memoryNext = new Map();
     /** Slots with a force or torque waiting: a step with none applied looks at nothing (rule 28). */
     this._forcedSlots = [];
     this._awakeCount = 0;
@@ -255,12 +272,29 @@ export class World2D {
       prev[t3] = tr[t3]; prev[t3 + 1] = tr[t3 + 1]; prev[t3 + 2] = tr[t3 + 2];
       turn[s2] = r[s2]; turn[s2 + 1] = r[s2 + 1];
     }
-    const substeps = this._substeps, h = dt / substeps, pins = this._lockMoveCount > 0;
+    const substeps = this._substeps, h = dt / substeps, pins = this._lockMoveCount > 0, g = this._gravity;
+    const gravity = Math.sqrt(g[0] * g[0] + g[1] * g[1]), c = this._contacts;
+    this._narrow(dt, gravity);
+    const touching = c.count > 0;
+    if (touching) {
+      makeSoft(STIFFNESS / h, DAMPING_RATIO, h, soft);
+      prepare(this, c);
+    }
     for (let sub = 0; sub < substeps; sub++) {
       this._accelerate(h, dt);
+      if (touching) warmStart(this, c);
+      if (pins) this._pin();
+      if (touching) solve(this, c, h, true);
       if (pins) this._pin();
       this._move(h);
+      if (touching) solve(this, c, h, false);
+      if (pins) this._pin();
     }
+    if (touching) {
+      restitution(this, c, gravity);
+      if (pins) this._pin();
+    }
+    this._remember();
     const angle = this._angle;
     for (let i = 0; i < this._awakeCount; i++) {
       const s = list[i], s2 = 2 * s, c = r[s2], z = r[s2 + 1], c0 = turn[s2], z0 = turn[s2 + 1];
@@ -278,6 +312,10 @@ export class World2D {
     this._slots = new Slots();
     for (const [name, Type] of COLUMNS) this[name] = new Type(0);
     this._geometry = [];
+    this._core = [];
+    this._contacts = new Contacts2D();
+    this._memory = new Map();
+    this._memoryNext = new Map();
     this._forcedSlots = [];
     this._awakeCount = 0;
     this._lockMoveCount = 0;
@@ -435,6 +473,7 @@ export class World2D {
     this._forced[s] = 0;
     this._force[2 * s] = 0; this._force[2 * s + 1] = 0; this._torque[s] = 0;
     this._geometry[s] = null;
+    this._core[s] = null;
     if (this._lockMove[s] !== 0) { this._lockMove[s] = 0; this._lockMoveCount--; }
     this._unawaken(s);
     this._slots.release(s);
@@ -466,9 +505,11 @@ export class World2D {
   _resize(capacity) {
     this._slots.resize(capacity);
     for (const [name, , per] of COLUMNS) this[name] = resized(this[name], capacity * per);
-    const had = this._geometry.length;
-    this._geometry.length = capacity;
-    for (let s = had; s < capacity; s++) this._geometry[s] = null;
+    for (const g of [this._geometry, this._core]) {
+      const had = g.length;
+      g.length = capacity;
+      for (let s = had; s < capacity; s++) g[s] = null;
+    }
   }
 
   _awaken(s) {
@@ -498,6 +539,7 @@ export class World2D {
   _put(s, x, y, angle) {
     const s2 = 2 * s, c = cos(angle), z = sin(angle), ox = this._offset[s2], oy = this._offset[s2 + 1];
     this._rotation[s2] = c; this._rotation[s2 + 1] = z;
+    this._startTurn[s2] = c; this._startTurn[s2 + 1] = z;
     this._angle[s] = angle;
     this._position[s2] = x + c * ox - z * oy;
     this._position[s2 + 1] = y + z * ox + c * oy;
@@ -572,6 +614,7 @@ export class World2D {
     this._comGiven[s] = spec.centerOfMass === null ? 0 : 1;
     if (spec.centerOfMass !== null) { cx = spec.centerOfMass[0]; cy = spec.centerOfMass[1]; this._com[s2] = cx; this._com[s2 + 1] = cy; }
     this._offset[s2] = cx; this._offset[s2 + 1] = cy;
+    this._shaped(s, spec, cx, cy);
     const moves = spec.type === 'dynamic';
     this._invMass[s] = moves ? 1 / mass : 0;
     this._invInertia[s] = moves && !spec.lockRotation ? 1 / this._inertia[s] : 0;
@@ -589,6 +632,87 @@ export class World2D {
     this._pinned(s);
     this._place(s);
     this._settled(s);
+  }
+
+  /**
+   * Slot s's core, its corners from the centre of mass (cx, cy), and the size
+   * and reach everything else scales by. A compound has no core: step 4.
+   */
+  _shaped(s, spec, cx, cy) {
+    let corners = null, radius = 0;
+    if (spec.shape === 'box') {
+      const w = spec.size[0] * 0.5, h = spec.size[1] * 0.5;
+      corners = [-w, -h, w, -h, w, h, -w, h];
+    } else if (spec.shape === 'circle') {
+      corners = [0, 0]; radius = spec.radius;
+    } else if (spec.shape === 'capsule') {
+      const L = spec.height * 0.5 - spec.radius;
+      corners = [0, -L, 0, L]; radius = spec.radius;
+    } else if (spec.shape === 'polygon') {
+      corners = [...spec.vertices];
+    }
+    if (corners === null) { this._core[s] = null; this._size[s] = 0; this._reach[s] = 0; return; }
+    for (let k = 0; k < corners.length; k += 2) { corners[k] -= cx; corners[k + 1] -= cy; }
+    const core = this._core[s] = new Core(corners, radius);
+    let reach = 0;
+    for (let k = 0; k < core.n; k++) reach = Math.max(reach, core.x[k] * core.x[k] + core.y[k] * core.y[k]);
+    this._reach[s] = Math.sqrt(reach) + radius;
+    // The thinnest width: across each side, the furthest corner.
+    let width = Infinity;
+    if (core.n >= 3) {
+      for (let k = 0; k < core.n; k++) {
+        let far = 0;
+        for (let j = 0; j < core.n; j++) far = Math.max(far, -((core.x[j] - core.x[k]) * core.nx[k] + (core.y[j] - core.y[k]) * core.ny[k]));
+        width = Math.min(width, far);
+      }
+    }
+    this._size[s] = core.n >= 3 ? width + 2 * radius : 2 * radius;
+  }
+
+  /**
+   * This step's manifolds, and how far each body can move in it: speed, plus
+   * what gravity adds, plus spin times reach (a circle's spin moves nothing),
+   * all over dt. Two bodies further apart than the sum of theirs can't meet.
+   * ponytail: every pair, O(n²), and a Map of objects for the warm start, which
+   * allocates; step 3 of the plan gives this the tree and a pair list.
+   */
+  _narrow(dt, gravity) {
+    const list = this._awakeList, n = this._awakeCount, v = this._velocity, w = this._angular;
+    const motion = this._motion, reach = this._reach, shape = this._shape, type = this._type, size = this._size;
+    for (let i = 0; i < n; i++) {
+      const s = list[i], s2 = 2 * s;
+      const speed = Math.sqrt(v[s2] * v[s2] + v[s2 + 1] * v[s2 + 1]) + (type[s] === DYNAMIC ? gravity * dt : 0);
+      motion[s] = (speed + (shape[s] === CIRCLE ? 0 : Math.abs(w[s]) * reach[s])) * dt;
+    }
+    const c = this._contacts, core = this._core, p = this._position, top = this._slots.top, state = this._slots.state;
+    c.count = 0;
+    for (let a = 0; a < top; a++) {
+      if (state[a] !== 1 || core[a] === null) continue;
+      for (let b = a + 1; b < top; b++) {
+        if (state[b] !== 1 || core[b] === null || (type[a] !== DYNAMIC && type[b] !== DYNAMIC)) continue;
+        const dx = p[2 * b] - p[2 * a], dy = p[2 * b + 1] - p[2 * a + 1];
+        const far = reach[a] + reach[b] + motion[a] + motion[b] + Math.min(size[a], size[b]) * PIXEL;
+        if (dx * dx + dy * dy > far * far) continue;
+        const key = a * 16777216 + b;
+        meet(this, c, a, b, key, dt, this._memory.get(key));
+      }
+    }
+  }
+
+  /** What each pair pushed with, for the next step's warm start: see _narrow. */
+  _remember() {
+    const c = this._contacts, next = this._memoryNext;
+    next.clear();
+    for (let m = 0; m < c.count; m++) {
+      const m2 = 2 * m, two = c.points[m] === 2;
+      next.set(c.key[m], {
+        id0: c.id[m2], n0: c.normalImpulse[m2], t0: c.tangentImpulse[m2],
+        id1: two ? c.id[m2 + 1] : -1, n1: c.normalImpulse[m2 + 1], t1: c.tangentImpulse[m2 + 1],
+        roll: c.rollImpulse[m],
+      });
+    }
+    this._memoryNext = this._memory;
+    this._memory = next;
   }
 
   _applyForces(dt) {

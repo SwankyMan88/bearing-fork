@@ -92,7 +92,6 @@ test('a body falls and flies by the exact sum of its substeps', () => {
   near(ball.position[1], -300 * n * h + g * h * h * n * (n + 1) / 2, 1e-8, 'y');
   near(ball.position[0], 120 * n * h, 1e-9, 'x');
   near(ball.velocity[1], -300 + g * n * h, 1e-9, 'vy');
-  assert.equal(world.addBody({ gravityScale: 0, position: [5, 5] }).velocity[1], 0);
   const float = world.addBody({ gravityScale: 0, position: [5, 5] });
   world.step(DT);
   assert.deepEqual(float.position, [5, 5]);
