@@ -11,9 +11,11 @@ All notable changes to Bearing are recorded here. The format follows
 
 Joints and characters closer to what the games ask of them. A ball joint's cone can be an
 ellipse, so a shoulder swings further forward than up, and its edge is a rim the limb slides
-round. A character can push what it walks into, as hard as it is allowed. And the reference says
-why the first impact in a session is slower than the rest, and what to do about it. No
-simulation results changed from 1.1.0 for anything 1.1.0 could build. Saves move to format 14.
+round. A character can push what it walks into, as hard as it is allowed. A body can be locked
+along an axis as it could be about one, so a 3D scene can be played on one plane. And the
+reference says why the first impact in a session is slower than the rest, and what to do about
+it. No simulation results changed from 1.1.0 for anything 1.1.0 could build. Saves move to format
+15.
 
 ### Added
 
@@ -26,6 +28,9 @@ simulation results changed from 1.1.0 for anything 1.1.0 could build. Saves move
   dynamic body it walks into with, in newtons, so a player shoves a crate along as Jolt's
   characters do. It still stops at the crate each step, as at a wall, and follows as it gives way.
   The default, 0, pushes nothing, as before. The save format is 14.
+- **`lockPosition`.** Body option, the partner of `lockRotation`: the world axes a body's centre of
+  mass never moves along. It keeps a 3D scene on one plane whatever hits it, and makes wheels on
+  fixed axles, lifts and sliding doors from one option. The save format is 15.
 
 ### Changed
 

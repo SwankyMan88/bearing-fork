@@ -205,6 +205,14 @@ function move(world, s, dt) {
     }
   }
 
+  // Locked on an axis, it ends where it began along it, however it slid.
+  const held = world._lockMove[s];
+  if (held !== 0) {
+    for (let k = 0; k < 3; k++) {
+      if (held >> k & 1) { pos[k] = p[s3 + k]; vel[k] = 0; }
+    }
+  }
+
   // Where it found it can go, now, and still through the step; its velocity afterwards is its own.
   p[s3] = pos[0]; p[s3 + 1] = pos[1]; p[s3 + 2] = pos[2];
   v[s3] = 0; v[s3 + 1] = 0; v[s3 + 2] = 0;

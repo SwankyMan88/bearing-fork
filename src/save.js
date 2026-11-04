@@ -69,9 +69,10 @@ import { COLOURS, DIGITS } from './graph.js';
  * has a group (World._group): data of format 11 has none. 13 since a cone
  * may be an ellipse (joints.js, the cone2, swing and facing columns): data of
  * format 12 has none. 14 since a character may push (World._pushForce):
- * data of format 13 has none.
+ * data of format 13 has none. 15 since a body may be held on an axis
+ * (World._lockMove): data of format 14 has none.
  */
-export const FORMAT = 14;
+export const FORMAT = 15;
 
 /**
  * The version of Bearing this is, stamped into every save: package.json's,

@@ -191,7 +191,7 @@ const BODY_OPTIONS = [
   'type', 'shape', 'size', 'radius', 'height', 'vertices', 'indices', 'heights', 'columns', 'spacing', 'parts',
   'density', 'mass', 'inertia', 'centerOfMass',
   'friction', 'restitution', 'damping', 'angularDamping', 'gravityScale', 'layers', 'mask', 'group', 'sensor',
-  'lockRotation', 'maxSlope', 'stepHeight', 'pushForce',
+  'lockRotation', 'lockPosition', 'maxSlope', 'stepHeight', 'pushForce',
   'position', 'rotation', 'velocity', 'angularVelocity',
 ];
 
@@ -212,7 +212,7 @@ const DEFAULTS = Object.freeze({
   friction: 0.5, restitution: 0, damping: 0, angularDamping: 0, gravityScale: 1,
   // In the first layer, and colliding with all 32: everything collides with
   // everything until told otherwise (rule 110).
-  layers: 1, mask: 0xffffffff, group: 0, sensor: false, lockRotation: [false, false, false],
+  layers: 1, mask: 0xffffffff, group: 0, sensor: false, lockRotation: [false, false, false], lockPosition: [false, false, false],
   // A character walks up ground as steep as friction 1 can hold, 45°: about
   // where walking turns into climbing, and Unity's, Godot's, Rapier's and
   // PhysX's default. Its step height follows its size (see _write).
@@ -294,6 +294,7 @@ const COLUMNS = [
   ['_staticMoved', Uint8Array, 1],   // 1 for a static body moved or changed since the last step
   ['_sensor', Uint8Array, 1],        // 1 for a sensor: it reports what it overlaps, and pushes nothing
   ['_lock', Uint8Array, 1],          // bit k: it never turns about world axis k
+  ['_lockMove', Uint8Array, 1],      // bit k: its centre of mass never moves along world axis k
   ['_colours', Int32Array, 1],       // while a step colours its manifolds: the colours this body's hold, as bits (graph.js)
   // Characters (character.js):
   ['_maxSlope', Float64Array, 1],
@@ -338,7 +339,7 @@ export class World {
     this._still = null; this._rest = null; this._island = null; this._islandNext = null;
     this._parent = null; this._least = null; this._slept = null; this._frozen = null; this._calm = null;
     this._staticMoved = null;
-    this._sensor = null; this._lock = null; this._colours = null; this._maxSlope = null;
+    this._sensor = null; this._lock = null; this._lockMove = null; this._colours = null; this._maxSlope = null;
     this._slopeCos = null; this._pushForce = null; this._stepHeight = null; this._stepGiven = null; this._ground = null;
     this._groundAt = null; this._walk = null; this._jointHead = null; this._jointTally = null;
     this._node = null; this._movedAt = null; this._seen = null; this._movedOut = null;
@@ -429,6 +430,7 @@ export class World {
     this._sensed = new Int32Array(0);
     this._sensedCount = 0;
     this._sensorCount = 0;
+    this._lockMoveCount = 0;
     this._characterCount = 0;
     /** Bodies whose centre of mass or principal axes are off their origin's: transforms convert only those. */
     this._framedCount = 0;
@@ -635,6 +637,7 @@ export class World {
     }
     for (const k of MATERIAL) out[k] = spec[k];
     out.lockRotation = [...spec.lockRotation];
+    out.lockPosition = [...spec.lockPosition];
     if (spec.type === 'character') {
       out.maxSlope = spec.maxSlope;
       out.stepHeight = spec.stepGiven ? spec.stepHeight : null;
@@ -1034,20 +1037,24 @@ export class World {
       // The bodies' pose is numbered as the step begins and after each move,
       // for the joints' kept work (joints.js, KEPT WORK).
       if (held > 0) { turnedInertias(this); joints.pose++; }
+      const pins = this._lockMoveCount > 0;
       for (let sub = 0; sub < substeps; sub++) {
         this._accelerate(h);
         if (touching > 0) warmStart(this, next);
         if (lull) jobs.lull(0);
         if (held > 0) warmStartJoints(this);
+        if (pins) this._pin();
         if (touching > 0) solve(this, next, h, true, sub > 0);
         if (lull) jobs.lull(1);
         if (held > 0) solveJoints(this, h, true, sub > 0);
+        if (pins) this._pin();
         this._move(h);
         if (held > 0) { turnedInertias(this); joints.pose++; }
         if (touching > 0) solve(this, next, h, false);
         if (lull) jobs.lull(2);
         // Kept for the next substep's solve pass: the last has none.
         if (held > 0) solveJoints(this, h, false, false, sub < substeps - 1);
+        if (pins) this._pin();
       }
     } finally {
       if (parallel) jobs.end();
@@ -1057,6 +1064,7 @@ export class World {
     const g = this._gravity, gravity = Math.sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
     if (touching > 0) {
       restitution(this, next, gravity);
+      if (this._lockMoveCount > 0) this._pin();
       store(this, next);
     }
     // The catch's sweeps look for bodies out of their fat boxes where the
@@ -2000,6 +2008,7 @@ export class World {
     this._wake(s);
     (name === 'velocity' ? this._velocity : this._angular).set(value, s * 3);
     if (name !== 'velocity') this._unlocked(s);
+    else this._pinned(s);
   }
 
   /**
@@ -2049,6 +2058,7 @@ export class World {
     v[s3] = (cx - p[s3]) / dt; v[s3 + 1] = (cy - p[s3 + 1]) / dt; v[s3 + 2] = (cz - p[s3 + 2]) / dt;
     a[s3] = x * spin; a[s3 + 1] = y * spin; a[s3 + 2] = z * spin;
     this._unlocked(s);
+    this._pinned(s);
   }
 
   // Forces and impulses. Each checks its arguments whatever the body's type,
@@ -2092,6 +2102,7 @@ export class World {
     this._wake(s);
     const s3 = s * 3, m = this._mass[s];
     this._velocity[s3] += j[0] / m; this._velocity[s3 + 1] += j[1] / m; this._velocity[s3 + 2] += j[2] / m;
+    this._pinned(s);
     if (at) {
       const rx = at[0] - this._position[s3], ry = at[1] - this._position[s3 + 1], rz = at[2] - this._position[s3 + 2];
       this._turn(s, ry * j[2] - rz * j[1], rz * j[0] - rx * j[2], rx * j[1] - ry * j[0]);
@@ -2135,6 +2146,7 @@ export class World {
     if (s < this._placed.length) this._placed[s] = null;
     if (this._framed[s] === 1) { this._framed[s] = 0; this._framedCount--; }
     if (this._sensor[s] === 1) { this._sensor[s] = 0; this._sensorCount--; }
+    if (this._lockMove[s] !== 0) { this._lockMove[s] = 0; this._lockMoveCount--; }
     // The next body in the slot starts its count afresh, whatever its type.
     if (this._type[s] === CHARACTER) { this._type[s] = DYNAMIC; this._characterCount--; }
     this._epoch++;
@@ -2219,6 +2231,7 @@ export class World {
       group: this._group[s],
       sensor: this._sensor[s] === 1,
       lockRotation: [(this._lock[s] & 1) !== 0, (this._lock[s] & 2) !== 0, (this._lock[s] & 4) !== 0],
+      lockPosition: [(this._lockMove[s] & 1) !== 0, (this._lockMove[s] & 2) !== 0, (this._lockMove[s] & 4) !== 0],
       maxSlope: this._maxSlope[s],
       stepHeight: this._stepHeight[s],
       stepGiven: this._stepGiven[s] === 1,
@@ -2343,6 +2356,10 @@ export class World {
     this._tumbled.fill(NaN, s3, s3 + 3);
     this._lock[s] = (spec.lockRotation[0] ? 1 : 0) | (spec.lockRotation[1] ? 2 : 0) | (spec.lockRotation[2] ? 4 : 0);
     this._unlocked(s);
+    const held = (spec.lockPosition[0] ? 1 : 0) | (spec.lockPosition[1] ? 2 : 0) | (spec.lockPosition[2] ? 4 : 0);
+    this._lockMoveCount += (held !== 0 ? 1 : 0) - (this._lockMove[s] !== 0 ? 1 : 0);
+    this._lockMove[s] = held;
+    this._pinned(s);
     this._maxSlope[s] = spec.maxSlope;
     this._slopeCos[s] = cos(spec.maxSlope);
     this._pushForce[s] = spec.pushForce;
@@ -2357,6 +2374,37 @@ export class World {
   }
 
   /** Slot s's spin about any axis it is locked about, which stays zero: setting it is kept to the free axes. */
+  /**
+   * Every awake body's speed along the axes it is locked on, back to 0: how
+   * lockPosition holds. Done after what pushes bodies and before what reads
+   * or moves them, not by a mass of infinity along the axis, which would put
+   * a per-axis mass in every hot loop of the contact and joint solvers for a
+   * feature most worlds don't use (Rapier and Jolt do that). The solver still
+   * counts such a body as free to give way, so a first hit on it is taken up
+   * over a few substeps rather than in one; what rests on it is held exactly,
+   * since the warm start carries the whole load. Measured in
+   * test/motion.test.js. ponytail: walks the awake list; a list of locked
+   * bodies when worlds of thousands lock few.
+   */
+  _pin() {
+    const list = this._awakeList, lock = this._lockMove, v = this._velocity;
+    for (let i = 0; i < this._awakeCount; i++) {
+      const s = list[i], l = lock[s];
+      if (l === 0) continue;
+      const s3 = 3 * s;
+      if ((l & 1) !== 0) v[s3] = 0;
+      if ((l & 2) !== 0) v[s3 + 1] = 0;
+      if ((l & 4) !== 0) v[s3 + 2] = 0;
+    }
+  }
+
+  /** One body's speed along its locked axes back to 0, so what is set reads as what it will do. */
+  _pinned(s) {
+    const lock = this._lockMove[s], s3 = 3 * s;
+    if (lock === 0) return;
+    for (let k = 0; k < 3; k++) if (lock >> k & 1) this._velocity[s3 + k] = 0;
+  }
+
   _unlocked(s) {
     const lock = this._lock[s], s3 = 3 * s;
     if (lock === 0) return;
@@ -2518,6 +2566,14 @@ function resolve(caller, base, given) {
     }
     lockRotation = [l[0], l[1], l[2]];
   }
+  let lockPosition = base.lockPosition;
+  if (has('lockPosition')) {
+    const l = given.lockPosition;
+    if (!(l !== null && typeof l === 'object' && l.length === 3 && [0, 1, 2].every((k) => typeof l[k] === 'boolean'))) {
+      fail(caller, `lockPosition must be 3 true or false values, got ${show(l)}`);
+    }
+    lockPosition = [l[0], l[1], l[2]];
+  }
   if (type !== 'character') for (const k of WALKING) if (has(k)) fail(caller, `a ${type} body has no ${k}`);
   let maxSlope = base.maxSlope;
   if (has('maxSlope')) {
@@ -2552,7 +2608,7 @@ function resolve(caller, base, given) {
   return {
     type, shape, size, radius, height, geometry, density, mass, massGiven, inertia, inertiaGiven, centerOfMass,
     friction, restitution, damping, angularDamping, gravityScale, layers, mask, group, sensor,
-    lockRotation, maxSlope, stepHeight, stepGiven, pushForce, position, rotation, velocity, angularVelocity,
+    lockRotation, lockPosition, maxSlope, stepHeight, stepGiven, pushForce, position, rotation, velocity, angularVelocity,
   };
 }
 

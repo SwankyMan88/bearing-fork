@@ -192,7 +192,7 @@ export function joints(): void {
   const hinge: Joint = world.addJoint({ type: 'hinge', a: door, b: frame, anchor: [0, 1, 0], axis: [0, 1, 0], min: 0, max: Math.PI / 2 });
   world.addJoint({ a: door, anchor: [0, 5, 0] });
   world.addJoint({ type: 'ball', a: door, b: null, axis: [0, -1, 0], cone: 0.5, min: -0.3, frictionForce: 2 });
-  world.addBody({ type: 'character', shape: 'capsule', pushForce: 100 });
+  world.addBody({ type: 'character', shape: 'capsule', pushForce: 100, lockPosition: [false, false, true] });
   const shoulder = world.addJoint({ type: 'ball', a: door, b: frame, axis: [1, 0, 0], cone: [Math.PI / 2, Math.PI / 6], swing: [0, 0, 1] });
   const shoulderInfo = world.jointOf(shoulder);
   const reach: number | [number, number] = shoulderInfo.type === 'ball' ? shoulderInfo.cone : 0;

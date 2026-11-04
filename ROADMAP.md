@@ -831,7 +831,7 @@ Each milestone that adds API is a minor version. Fixes between them are patches.
 | 0.14.0 | 18, 19, 20 | The first release, 2026-11-02 (Nolan chose to start at the planned number): everything through joint forces, with 19 and 20 in it. |
 | 1.0.0 | 21 | Released 2026-11-03: the API gone through and made to last, the determinism hash on Bun. |
 | 1.1.0 | — | Released 2026-11-03: impact events, groups, `ignore` lists, `body.moveTo`. |
-| 1.2.0 | — | Released 2026-11-03: elliptical joint cones, characters that push, the first-impact note. |
+| 1.2.0 | — | Elliptical joint cones, characters that push, `lockPosition`, the first-impact note. |
 
 ### How a release is made
 
@@ -1060,7 +1060,7 @@ Winding's way, copied before the first one:
   bodies already touching (the battle sim's damage), groups, `ignore` lists and `body.moveTo`.
   Left until a game asks: per-body sleep, listing bodies and joints, more contact detail and
   friction per compound part; elliptical joint cones until a ragdoll's limits look wrong.
-- **2026-11-03.** 1.2.0 released, at Nolan's word ("Approved as recommended, go ahead"): elliptical
+- **2026-11-03.** 1.2.0 made ready, at Nolan's word ("Approved as recommended, go ahead"): elliptical
   cones with `swing`, characters' `pushForce`, and the note on the first steps' compiling, after
   probing the games' scenes (a 300-capsule horde at 2.6 ms a step; an 80-brick jointed wall at
   2.4 ms). Found and left for 1.2.1: a box resting on two single points swings about the line

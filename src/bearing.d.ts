@@ -62,6 +62,8 @@ interface BodyCommon {
   sensor?: boolean;
   /** The world axes it never turns about, x, y and z, default [false, false, false]. */
   lockRotation?: readonly [boolean, boolean, boolean];
+  /** The world axes its centre of mass never moves along, x, y and z, default [false, false, false]. */
+  lockPosition?: readonly [boolean, boolean, boolean];
   /** A character's steepest walkable ground, radians from 0 to π/2, default π/4. Characters only. */
   maxSlope?: number;
   /** The tallest step a character walks up, m, default its height ÷ 9; null follows its size. Characters only. */
@@ -235,6 +237,7 @@ interface BodyInfoCommon {
   group: number;
   sensor: boolean;
   lockRotation: [boolean, boolean, boolean];
+  lockPosition: [boolean, boolean, boolean];
   /** A character's. */
   maxSlope?: number;
   /** A character's: as given, or null while it follows its size. */
