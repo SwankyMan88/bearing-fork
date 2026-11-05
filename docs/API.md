@@ -215,6 +215,13 @@ one-metre boxes within 2.5 mm of where it was built after 10 s at 60 Hz (at 7 it
 4, 9 mm). It is not there to be tuned for a correct result; raise it for unusual scenes, such as a
 heavy body resting on a much lighter one, a very tall stack, or a step much longer than 1/60 s.
 
+Fewer substeps is the one setting that trades accuracy for speed. Contacts take most of a busy
+step, and they cost about as much as the substeps, so at 4 the same 210-box pyramid stepped 2.4
+times as fast (2.03 ms against 4.92 ms on one thread), with its boxes 5.2 mm from where they were
+built and 32 mm sunk after 10 s, against 1.1 mm and 7.9 mm at 8. A 10-box stack still stood. That
+suits a game with many loose objects and no tall stacks; keep the default where stacks must stand
+exactly.
+
 <a id="world-sleeping"></a>
 ### `world.sleeping` → `boolean`
 

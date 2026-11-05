@@ -9,6 +9,8 @@ All notable changes to Bearing are recorded here. The format follows
 
 ### Changed
 
+- `docs/API.md`: `world.substeps` says what fewer substeps gains and loses, measured: at 4, the
+  210-box pyramid steps 2.4 times as fast and sinks 32 mm in 10 s, against 7.9 mm at 8.
 - Small worlds no longer run slower with workers on. A contact colour goes to the workers from 16
   rows, not 4: a 10-box stack steps in 0.112 ms, down from 0.212 ms and now under its one-thread
   time, and the 210-box pyramid and 1,000-box pile are unchanged. Results are the same bits either way.
