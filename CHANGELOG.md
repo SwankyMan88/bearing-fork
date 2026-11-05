@@ -12,6 +12,10 @@ All notable changes to Bearing are recorded here. The format follows
 - Small worlds no longer run slower with workers on. A contact colour goes to the workers from 16
   rows, not 4: a 10-box stack steps in 0.112 ms, down from 0.212 ms and now under its one-thread
   time, and the 210-box pyramid and 1,000-box pile are unchanged. Results are the same bits either way.
+- The 210-box pyramid steps about 3% faster on one thread: a four-point contact's right-hand side
+  in the block normal solve is written out. The 1,000-box pile is unchanged. Same bits.
+- The pyramid steps another 2-3% faster on one thread: with every point of a face pushing, the block
+  solve's check for a point to flip only looks for a pull. Same bits.
 
 ## [1.3.1] - 2026-11-05
 
