@@ -125,6 +125,24 @@ test('capsule and capsule: side by side, crossed, end to end, half alongside', (
   samePoints(r.points, [[[0.55, 0.1, 0], 0.1], [[0.55, 0.5, 0], 0.1]], 'half alongside');
 });
 
+test('capsule and capsule: nearly side by side they lie on both ends, at an angle on one point', () => {
+  const lying = turn([0, 0, 1], -Math.PI / 2);
+  // Lying along (cos a, 0, sin a).
+  const yawed = (a) => turn([Math.sin(a), 0, -Math.cos(a)], Math.PI / 2);
+  const under = make({ shape: 'capsule', position: [0, 0, 0], rotation: lying, height: 2 });
+  // 2 mrad off level: the closest pair is at one end, 2 mm from the other's gap.
+  let r = run(make({ shape: 'capsule', position: [0, 0.95, 0], rotation: turn([0, 0, 1], -Math.PI / 2 + 0.002), height: 2 }), under);
+  const span = (points) => Math.max(...points.map((p) => p.p[0])) - Math.min(...points.map((p) => p.p[0]));
+  assert.ok(span(r.points) > 0.9, 'nearly side by side: held at both ends');
+  // Yawed about the normal, the ends sit off to the side: their true gap, not
+  // the gap along the normal, says whether they count.
+  r = run(make({ shape: 'capsule', position: [0, 0.95, 0], rotation: yawed(0.002), height: 2 }), under);
+  assert.ok(span(r.points) > 0.9, 'yawed a hair: held at both ends');
+  for (const p of r.points) assert.ok(p.s >= -0.05 - 1e-9, `no end measured deeper than the closest pair, got ${p.s}`);
+  r = run(make({ shape: 'capsule', position: [0, 0.95, 0], rotation: yawed(0.5), height: 2 }), under);
+  assert.equal(r.count, 1, 'at an angle');
+});
+
 test('capsule and box: lying on a face, standing on it, across an edge, and through it', () => {
   const box = make({ size: [4, 1, 4] });   // top face at y = 0.5
   const lying = turn([0, 0, 1], -Math.PI / 2);   // the capsule's axis along x
@@ -136,8 +154,20 @@ test('capsule and box: lying on a face, standing on it, across an edge, and thro
   // Along z, just over the edge where the top meets the +x side.
   r = run(make({ shape: 'capsule', position: [2.3, 0.8, 0], rotation: turn([1, 0, 0], Math.PI / 2) }), box);
   near(r.normal, [-Math.SQRT1_2, -Math.SQRT1_2, 0], 'edge normal');
-  assert.equal(r.count, 1);
-  near([r.points[0].s], [0.3 * Math.SQRT2 - 0.5], 'edge separation');
+  assert.equal(r.count, 2, 'along the edge: its two ends');
+  near(r.points.map((p) => p.s), [0.3 * Math.SQRT2 - 0.5, 0.3 * Math.SQRT2 - 0.5], 'edge separation');
+  // Crossing that edge at a right angle, leaning over it, it touches at one point.
+  r = run(make({ shape: 'capsule', position: [2.3, 0.8, 0], rotation: turn([0, 0, 1], Math.PI / 4) }), box);
+  assert.equal(r.count, 1, 'across the edge: one point');
+  // Across a narrow box, past both its sides and tilted a hair: it lies on
+  // both sides, not at whichever is lower this step.
+  const tilted = turn([0, 0, 1], -Math.PI / 2 + 0.002);
+  r = run(make({ shape: 'capsule', radius: 0.5, height: 3, position: [0, 0.9, 0], rotation: tilted }), make({ size: [1, 1, 4] }));
+  assert.equal(r.count, 2, 'across a narrow box: both sides');
+  assert.ok(Math.abs(r.points[0].p[0] - r.points[1].p[0]) > 0.9, 'a point at each side');
+  // Tilted further, the high side is more than the tolerance off: one point.
+  r = run(make({ shape: 'capsule', radius: 0.5, height: 3, position: [0, 0.9, 0], rotation: turn([0, 0, 1], -Math.PI / 2 + 0.1) }), make({ size: [1, 1, 4] }));
+  assert.equal(r.count, 1, 'tilted across a narrow box: one point');
   // A long thin capsule through the box, 0.2 below its top: out through the top.
   r = run(make({ shape: 'capsule', radius: 0.3, height: 6, position: [0, 0.3, 0], rotation: lying }), box);
   near(r.normal, [0, -1, 0], 'through normal');
@@ -334,8 +364,10 @@ test('random pairs agree with the brute-force reference', () => {
       // inside a box, are exact, less the tolerance a face may win a tie by.
       const axes = (ka === 'box' && kb === 'box') || (ka === 'capsule' && kb === 'box' && truth <= -a.half[0]);
       if (!axes && (ka !== 'box' || kb !== 'box')) {
-        // Closest points: exact, so the deepest point is the distance.
-        near([deepest], [truth], `${what}: deepest vs reference`, REF);
+        // Closest points: exact, so the deepest point is the distance. A
+        // capsule along a box rests on the ends of a stretch within the
+        // tolerance of it, not on the closest point (collide.js, capsuleBox).
+        near([deepest], [truth], `${what}: deepest vs reference`, ka === 'capsule' && kb === 'box' ? TOLERANCE + REF : REF);
       } else if (truth <= 0) {
         near([deepest], [truth], `${what}: deepest vs reference`, TOLERANCE + REF);
       } else {
@@ -378,7 +410,9 @@ test('every point sits midway between the two surfaces, never out in the open', 
     for (let k = 0; k < 400; k++) {
       const a = randomShape(ka), b = randomShape(kb);
       const r = run(a, b, MARGIN, TOLERANCE);
-      const slack = (ka === 'capsule' && kb === 'capsule') || (ka === 'box' && kb === 'box') ? TOLERANCE : 0;
+      // A stretch's end on a box keeps the shared normal, not its own way to the
+      // box, so it can lie a little further off: 2.6 tolerances at most here.
+      const slack = ka === 'capsule' && kb === 'box' ? 3 * TOLERANCE : (ka === 'capsule' && kb === 'capsule') || (ka === 'box' && kb === 'box') ? TOLERANCE : 0;
       const ballOfA = ka === 'capsule' && kb === 'box';
       for (const { p, s } of r.points) {
         const onA = sd(a, p.map((v, i) => v - r.normal[i] * s / 2));

@@ -184,3 +184,67 @@ test('bursts of bodies leave nothing behind: pairs, tree and storage come back',
     assert.equal(world._pairs.capacity, 16);
   }
 });
+
+// The list of bodies to ask the trees about holds each slot once, at most one
+// to a slot of capacity, so it can't run off its end.
+const listed = (world) => {
+  const { moved, movedCount } = world._broad, seen = new Set();
+  assert.ok(movedCount <= moved.length, `${movedCount} listed in room for ${moved.length}`);
+  for (let i = 0; i < movedCount; i++) {
+    assert.ok(moved[i] < world._slots.capacity, `slot ${moved[i]} listed past capacity ${world._slots.capacity}`);
+    assert.ok(!seen.has(moved[i]), `slot ${moved[i]} listed twice`);
+    seen.add(moved[i]);
+  }
+};
+const block = (k) => ({ shape: 'compound', parts: [{ size: [8, 8] }, { size: [8, 8], position: [8, 0] }], position: [k * 30, 0] });
+
+test('slots removed and reused with no step between are listed once', () => {
+  const world = new World2D(), live = [];
+  for (let k = 0; k < 620; k++) {
+    live.push(world.addBody(block(k)));
+    if (live.length >= 500) live.shift().destroy();
+    listed(world);
+  }
+  while (live.length > 130) live.pop().destroy();
+  listed(world);
+  world.step(DT);
+});
+
+test('a shrink leaves nothing listed past the new capacity', () => {
+  const world = new World2D(), low = [], high = [];
+  for (let k = 0; k < 100; k++) low.push(world.addBody(block(k)));
+  world.step(DT);
+  for (let k = 100; k < 500; k++) high.push(world.addBody(block(k)));
+  for (const b of high) b.destroy();
+  while (low.length > 1) low.pop().destroy();
+  assert.ok(world._slots.capacity <= 2, `storage held at ${world._slots.capacity}`);
+  listed(world);
+  world.step(DT);
+});
+
+test('a body in a reused slot still finds what it touches on the next step', () => {
+  const world = new World2D({ gravity: [0, 0] });
+  const a = world.addBody({ size: [10, 10] });
+  const gone = world.addBody({ size: [10, 10], position: [500, 0] });
+  gone.destroy();
+  const b = world.addBody({ size: [10, 10], position: [8, 0] });
+  world.step(DT);
+  assert.equal(world.touching(a)[0]?.id, b.id);
+});
+
+test('adding, removing and stepping at random keeps the list sound', () => {
+  const world = new World2D({ gravity: [0, 0] }), live = [];
+  for (let k = 0; k < 6000; k++) {
+    const r = rand();
+    if (r < 0.48) live.push(world.addBody(block(Math.floor(rand() * 200))));
+    else if (r < 0.98 && live.length > 0) {
+      const i = Math.floor(rand() * live.length);
+      live[i].destroy();
+      live[i] = live[live.length - 1];
+      live.pop();
+    } else world.step(DT);
+    listed(world);
+    if (k % 1500 === 1499) for (const b of live.splice(0)) { b.destroy(); listed(world); }
+  }
+  world.step(DT);
+});

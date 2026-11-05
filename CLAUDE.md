@@ -374,6 +374,16 @@ These were made with Nolan and override the rules below where they differ.
   point left out restarts the four from the pressed point nearest that line (`foot()`, `under()`),
   not from the deepest, which rounding decides between near-equal points; HELD UP stays for
   contacts no weight bears on. `triangle.js` has no UNDER yet. About 1.5% more on the box pile.
+- **Capsules alongside rest on two points** (2026-11-04, the swing, Nolan: "Go ahead with the 1.3.1
+  swing fix"): a contact a small tilt runs along a capsule pushes where it was as the step began, and
+  that lag feeds the rocking. `capsuleCapsule` keeps a stretch's ends by their true gap, within the
+  tolerance of the closest pair (no longer by how far off the normal), the closest as a third point
+  if deeper; `capsuleBox`, off an edge or corner, takes the outermost of the segment's ends and its
+  crossings of the box's planes within the tolerance, those two points and no third. Points must sit
+  at fixed features: ends found by halving to the tolerance ran about and were no better than one
+  point. A third point on boxes, or none on capsule pairs: 13 heaps over 20 s against 3. Heaps not
+  asleep at 40 s 9 of 120 -> 2, about 7% faster. Hulls measured no better and are unchanged. A
+  capsule on two edges at a very shallow angle can still rock: that needs contacts found within the step.
 - **Hull face contacts hold the overlap** (2026-10-23): `hullFace` takes the incident face at the
   deepest corner (of its faces, the one most against the normal), and returns false when its clip
   doesn't reach within the tolerance of that corner's depth; `hullHull` then uses the strictly best

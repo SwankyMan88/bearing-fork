@@ -842,6 +842,7 @@ Each milestone that adds API is a minor version. Fixes between them are patches.
 | 1.0.0 | 21 | Released 2026-11-03: the API gone through and made to last, the determinism hash on Bun. |
 | 1.1.0 | — | Released 2026-11-03: impact events, groups, `ignore` lists, `body.moveTo`. |
 | 1.3.0 | — | Released 2026-11-04: the 2D module, elliptical joint cones, characters that push, `lockPosition`, the first-impact note. 1.2.0 was prepared and never released. |
+| 1.3.1 | — | Released 2026-11-05: a 2D broadphase crash found in Fragile, and the rocking capsule. |
 
 ### How a release is made
 
@@ -1085,3 +1086,17 @@ Winding's way, copied before the first one:
   1.2.0's pull request was refused by the permission check and 2D had landed on `develop` by then,
   so 1.2.0 never shipped and its section folded into 1.3.0. The 2D module's steps 1-6 are in it. The
   swing left for 1.2.1 is now for 1.3.1.
+- **2026-11-04.** The swing, at Nolan's word ("Go ahead with the 1.3.1 swing fix"). It was a capsule
+  rocking on a contact that a small tilt runs along it (`along` 0.26 to -0.09 m for 0.1 rad): the
+  solver pushes where the point was as the step began, the lagging push feeds the rocking, and it
+  settles where that equals rolling resistance, which is why more substeps didn't help. Replayed
+  from a save it rang at 1.38 rad/s for 24 s; no slip pull-back and no tumble barely changed it.
+  Capsules alongside what they touch now rest on two points at fixed features (`collide.js`). Heaps
+  not asleep at 40 s 9 of 120 -> 2, at 20 s 14 -> 3. Tried and measured no better or worse: carrying
+  a lost point's load to new points, ends at the edge of the tolerance found by halving, the
+  closest point as a third on boxes, hulls the same way. Left: a capsule on two edges at a very
+  shallow angle, whose contact still sweeps within the tolerance. Also seen, not fixed: 1 hull in
+  12,000 pressed through a mesh floor by a heap (seed 22, 3.5 s).
+- **2026-11-05.** 1.3.1 released, at Nolan's word ("Go for it"), with the 2D broadphase crash Fragile
+  found: `Broad2D.remove` cleared a slot's mark while it stayed on the moved list, and `resize` cut
+  that list by count. 3D had neither.

@@ -7,6 +7,31 @@ All notable changes to Bearing are recorded here. The format follows
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-11-05
+
+A crash fixed in 2D, and a rocking capsule that kept 3D heaps awake. Adding and removing bodies
+between steps could make a 2D world's next `step` throw, which a game breaking blocks into pieces
+does all the time. In 3D, a capsule lying nearly along what it rests on now settles. There is no
+API change and saves stay at format 15, but a save loads only into the version that made it, and
+3D results change wherever capsules touch boxes or each other, so a replay recorded on 1.3.0 won't
+match.
+
+### Fixed
+
+- **2D: a crash in `world.step` after adding and removing bodies between steps.** A slot removed
+  and reused before a step was listed twice for the broadphase, so enough of them ran past the end
+  of the list, and a world that shrank kept entries for slots it no longer had. Either way
+  `step` threw `Cannot read properties of undefined (reading 'box')`. 3D never had this.
+- **A capsule no longer rocks for good on what it lies along.** A capsule nearly side by side with
+  another, along a box's edge or across a box past both its sides got one contact point, which a
+  tilt of a few milliradians ran the length of the capsule. The solver pushes where a point was as
+  the step began, so the push lagged the rocking and fed it, as much as rolling resistance took
+  out, and the heap around it stayed awake. Such a capsule now rests on both ends of the stretch
+  within the contact tolerance. Of 120 mixed heaps of 200 bodies, 2 were still awake at 40 s, from
+  9, and 3 at 20 s, from 14; a step of them took about 7% less time. 3D results change wherever
+  capsules touch boxes or each other. A capsule rocking on two edges at a very shallow angle can
+  still keep going: that takes contacts found again within the step.
+
 ## [1.3.0] - 2026-11-04
 
 Bearing in two dimensions, and joints and characters closer to what the games ask of them. There
@@ -509,7 +534,8 @@ version may still change it.
   continuous collision doesn't make a sensor see a body that passes through it within a step (it
   said a later version would).
 
-[Unreleased]: https://github.com/getlowarc/bearing/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/getlowarc/bearing/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/getlowarc/bearing/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/getlowarc/bearing/compare/v1.1.0...v1.3.0
 [1.1.0]: https://github.com/getlowarc/bearing/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/getlowarc/bearing/compare/v0.14.0...v1.0.0

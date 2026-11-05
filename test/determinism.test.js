@@ -15,7 +15,7 @@ import { World2D } from '../src/2d/bearing2d.js';
 
 suite('determinism');
 
-const HASH = '8ba8e0f14c1a6cd6586f8476c1112a01c296555bcee6d122b013aff6e67bff5f';
+const HASH = 'fe58e0d8bff0ff2bca9917d328c430fe1517ae2b42389ae7569d40c5c6bc832e';
 const HASH_2D = '9f78f80605d08cc77f303c3e6074c06cf7f7b3af24d6dd5462a25ca1c5fae441';
 
 test('a world of everything steps to the stored bits', () => {

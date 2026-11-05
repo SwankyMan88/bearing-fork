@@ -78,7 +78,7 @@ export const FORMAT = 15;
  * The version of Bearing this is, stamped into every save: package.json's,
  * which test/save.test.js holds it to, so a release can't change one alone.
  */
-export const VERSION = '1.3.0';
+export const VERSION = '1.3.1';
 
 /** The classes a world holds, by the name their objects are written under. */
 const CLASSES = { Slots, Broadphase, Tree, Pairs, Memory, Contacts, Joints, Forest, Events, Mesh, Heightfield, Hull, Parts, Part };
