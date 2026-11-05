@@ -1946,7 +1946,9 @@ function solveRows(world, c, h, bias, known, from, to) {
       for (let round = 0; ; round++) {
         pushes(K, kb, count, set);
         let flip = -1;
-        for (let k = 0; k < count && flip < 0; k++) {
+        // Every point pushing, a resting face's usual answer: only a pull can flip one.
+        if (set === 15) flip = solved[0] < 0 ? 0 : solved[1] < 0 ? 1 : solved[2] < 0 ? 2 : solved[3] < 0 ? 3 : -1;
+        else for (let k = 0; k < count && flip < 0; k++) {
           if (set >> k & 1) {
             if (solved[k] < 0) flip = k;
           } else {
