@@ -7,6 +7,12 @@ All notable changes to Bearing are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Small worlds no longer run slower with workers on. A contact colour goes to the workers from 16
+  rows, not 4: a 10-box stack steps in 0.112 ms, down from 0.212 ms and now under its one-thread
+  time, and the 210-box pyramid and 1,000-box pile are unchanged. Results are the same bits either way.
+
 ## [1.3.1] - 2026-11-05
 
 A crash fixed in 2D, and a rocking capsule that kept 3D heaps awake. Adding and removing bodies

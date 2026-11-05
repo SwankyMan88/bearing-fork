@@ -2143,8 +2143,16 @@ export const JOBS = [warmJob, solveJob, prepareJob, lookRows];
  * measured on whole steps of awake piles with 3 workers: with 22 such
  * contacts (20 boxes) a step took the same time looked at by the workers or
  * not, with 33 (30 boxes) 3% less, 44 7% and 109 17%; so 32.
+ *
+ * A solve row's least is 16, not the single dispatch's 4: a step has 16 solve
+ * dispatches a colour (two passes, 8 substeps), and with only a few rows each
+ * the workers' share went on waking and on the rows' cache lines moving
+ * between cores. Measured on whole steps with 'auto', medians of five
+ * alternating runs: a 10-box stack 0.212 -> 0.112 ms a step (it was twice its
+ * one-thread time), the 210-box pyramid 3.14 -> 3.15 and the 1,000-box pile
+ * 14.4 -> 14.4 ms, both within noise. 32 measured no better than 16.
  */
-export const LEAST = [16, 4, 2, 32];
+export const LEAST = [16, 16, 2, 32];
 
 /** What a world's Jobs needs from here: the jobs, their least, and the world's columns they read. */
 export const WORK = {
