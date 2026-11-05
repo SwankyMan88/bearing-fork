@@ -14,6 +14,8 @@ All notable changes to Bearing are recorded here. The format follows
   time, and the 210-box pyramid and 1,000-box pile are unchanged. Results are the same bits either way.
 - The 210-box pyramid steps about 3% faster on one thread: a four-point contact's right-hand side
   in the block normal solve is written out. The 1,000-box pile is unchanged. Same bits.
+- The pyramid steps another 2-3% faster on one thread: with every point of a face pushing, the block
+  solve's check for a point to flip only looks for a pull. Same bits.
 - The 1,000-box pile steps 1-2% faster on one thread: a two-point contact's block solve is written
   out. Same bits.
 
