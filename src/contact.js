@@ -1697,6 +1697,25 @@ function pushes(K, kb, count, set) {
     solved[0] = x0; solved[1] = x1; solved[2] = x2; solved[3] = x3;
     return;
   }
+  if (count === 2) {
+    // Two points, an edge resting on a face: the loops below written out, the
+    // same operations in the same order, so the same bits.
+    if (set === 3) {
+      const a00 = K[kb] * (1 + give[0]), a01 = K[kb + 1], a10 = K[kb + 4];
+      let a11 = K[kb + 5] * (1 + give[1]), r1 = wanted[1];
+      const r0 = wanted[0], f = a10 / a00;
+      a11 -= f * a01; r1 -= f * r0;
+      const x1 = r1 / a11;
+      solved[0] = (r0 - a01 * x1) / a00; solved[1] = x1;
+    } else if (set === 1) {
+      solved[0] = wanted[0] / (K[kb] * (1 + give[0])); solved[1] = 0;
+    } else if (set === 2) {
+      solved[0] = 0; solved[1] = wanted[1] / (K[kb + 5] * (1 + give[1]));
+    } else {
+      solved[0] = 0; solved[1] = 0;
+    }
+    return;
+  }
   let n = 0;
   for (let k = 0; k < count; k++) {
     solved[k] = 0;
