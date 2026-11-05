@@ -1697,6 +1697,25 @@ function pushes(K, kb, count, set) {
     solved[0] = x0; solved[1] = x1; solved[2] = x2; solved[3] = x3;
     return;
   }
+  if (count === 2) {
+    // Two points, an edge resting on a face: the loops below written out, the
+    // same operations in the same order, so the same bits.
+    if (set === 3) {
+      const a00 = K[kb] * (1 + give[0]), a01 = K[kb + 1], a10 = K[kb + 4];
+      let a11 = K[kb + 5] * (1 + give[1]), r1 = wanted[1];
+      const r0 = wanted[0], f = a10 / a00;
+      a11 -= f * a01; r1 -= f * r0;
+      const x1 = r1 / a11;
+      solved[0] = (r0 - a01 * x1) / a00; solved[1] = x1;
+    } else if (set === 1) {
+      solved[0] = wanted[0] / (K[kb] * (1 + give[0])); solved[1] = 0;
+    } else if (set === 2) {
+      solved[0] = 0; solved[1] = wanted[1] / (K[kb + 5] * (1 + give[1]));
+    } else {
+      solved[0] = 0; solved[1] = 0;
+    }
+    return;
+  }
   let n = 0;
   for (let k = 0; k < count; k++) {
     solved[k] = 0;
@@ -1927,7 +1946,17 @@ function solveRows(world, c, h, bias, known, from, to) {
       }
       // The right-hand side, K l - v - t, and the first guess: the points it pushes.
       let set = 0;
-      for (let k = 0; k < count; k++) {
+      if (count === 4) {
+        // A box face, a resting pile's usual manifold: the loop below written
+        // out in locals, the same operations in the same order, so the same bits.
+        const i0 = m * P, l0 = cNormalImpulse[i0], l1 = cNormalImpulse[i0 + 1], l2 = cNormalImpulse[i0 + 2], l3 = cNormalImpulse[i0 + 3];
+        const r0 = -closingNow[0] - target[0] + K[kb] * l0 + K[kb + 1] * l1 + K[kb + 2] * l2 + K[kb + 3] * l3;
+        const r1 = -closingNow[1] - target[1] + K[kb + 4] * l0 + K[kb + 5] * l1 + K[kb + 6] * l2 + K[kb + 7] * l3;
+        const r2 = -closingNow[2] - target[2] + K[kb + 8] * l0 + K[kb + 9] * l1 + K[kb + 10] * l2 + K[kb + 11] * l3;
+        const r3 = -closingNow[3] - target[3] + K[kb + 12] * l0 + K[kb + 13] * l1 + K[kb + 14] * l2 + K[kb + 15] * l3;
+        wanted[0] = r0; wanted[1] = r1; wanted[2] = r2; wanted[3] = r3;
+        set = (r0 > 0 ? 1 : 0) | (r1 > 0 ? 2 : 0) | (r2 > 0 ? 4 : 0) | (r3 > 0 ? 8 : 0);
+      } else for (let k = 0; k < count; k++) {
         let r = -closingNow[k] - target[k];
         for (let l = 0; l < count; l++) r += K[kb + P * k + l] * cNormalImpulse[m * P + l];
         wanted[k] = r;
@@ -1936,7 +1965,9 @@ function solveRows(world, c, h, bias, known, from, to) {
       for (let round = 0; ; round++) {
         pushes(K, kb, count, set);
         let flip = -1;
-        for (let k = 0; k < count && flip < 0; k++) {
+        // Every point pushing, a resting face's usual answer: only a pull can flip one.
+        if (set === 15) flip = solved[0] < 0 ? 0 : solved[1] < 0 ? 1 : solved[2] < 0 ? 2 : solved[3] < 0 ? 3 : -1;
+        else for (let k = 0; k < count && flip < 0; k++) {
           if (set >> k & 1) {
             if (solved[k] < 0) flip = k;
           } else {
