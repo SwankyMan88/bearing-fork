@@ -7,6 +7,15 @@ All notable changes to Bearing are recorded here. The format follows
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-11-05
+
+A crash fixed in 2D, and a rocking capsule that kept 3D heaps awake. Adding and removing bodies
+between steps could make a 2D world's next `step` throw, which a game breaking blocks into pieces
+does all the time. In 3D, a capsule lying nearly along what it rests on now settles. There is no
+API change and saves stay at format 15, but a save loads only into the version that made it, and
+3D results change wherever capsules touch boxes or each other, so a replay recorded on 1.3.0 won't
+match.
+
 ### Fixed
 
 - **2D: a crash in `world.step` after adding and removing bodies between steps.** A slot removed
@@ -525,7 +534,8 @@ version may still change it.
   continuous collision doesn't make a sensor see a body that passes through it within a step (it
   said a later version would).
 
-[Unreleased]: https://github.com/getlowarc/bearing/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/getlowarc/bearing/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/getlowarc/bearing/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/getlowarc/bearing/compare/v1.1.0...v1.3.0
 [1.1.0]: https://github.com/getlowarc/bearing/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/getlowarc/bearing/compare/v0.14.0...v1.0.0

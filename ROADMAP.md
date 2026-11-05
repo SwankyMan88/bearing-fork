@@ -842,6 +842,7 @@ Each milestone that adds API is a minor version. Fixes between them are patches.
 | 1.0.0 | 21 | Released 2026-11-03: the API gone through and made to last, the determinism hash on Bun. |
 | 1.1.0 | — | Released 2026-11-03: impact events, groups, `ignore` lists, `body.moveTo`. |
 | 1.3.0 | — | Released 2026-11-04: the 2D module, elliptical joint cones, characters that push, `lockPosition`, the first-impact note. 1.2.0 was prepared and never released. |
+| 1.3.1 | — | Released 2026-11-05: a 2D broadphase crash found in Fragile, and the rocking capsule. |
 
 ### How a release is made
 
@@ -1096,3 +1097,6 @@ Winding's way, copied before the first one:
   closest point as a third on boxes, hulls the same way. Left: a capsule on two edges at a very
   shallow angle, whose contact still sweeps within the tolerance. Also seen, not fixed: 1 hull in
   12,000 pressed through a mesh floor by a heap (seed 22, 3.5 s).
+- **2026-11-05.** 1.3.1 released, at Nolan's word ("Go for it"), with the 2D broadphase crash Fragile
+  found: `Broad2D.remove` cleared a slot's mark while it stayed on the moved list, and `resize` cut
+  that list by count. 3D had neither.
