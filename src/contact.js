@@ -1927,7 +1927,17 @@ function solveRows(world, c, h, bias, known, from, to) {
       }
       // The right-hand side, K l - v - t, and the first guess: the points it pushes.
       let set = 0;
-      for (let k = 0; k < count; k++) {
+      if (count === 4) {
+        // A box face, a resting pile's usual manifold: the loop below written
+        // out in locals, the same operations in the same order, so the same bits.
+        const i0 = m * P, l0 = cNormalImpulse[i0], l1 = cNormalImpulse[i0 + 1], l2 = cNormalImpulse[i0 + 2], l3 = cNormalImpulse[i0 + 3];
+        const r0 = -closingNow[0] - target[0] + K[kb] * l0 + K[kb + 1] * l1 + K[kb + 2] * l2 + K[kb + 3] * l3;
+        const r1 = -closingNow[1] - target[1] + K[kb + 4] * l0 + K[kb + 5] * l1 + K[kb + 6] * l2 + K[kb + 7] * l3;
+        const r2 = -closingNow[2] - target[2] + K[kb + 8] * l0 + K[kb + 9] * l1 + K[kb + 10] * l2 + K[kb + 11] * l3;
+        const r3 = -closingNow[3] - target[3] + K[kb + 12] * l0 + K[kb + 13] * l1 + K[kb + 14] * l2 + K[kb + 15] * l3;
+        wanted[0] = r0; wanted[1] = r1; wanted[2] = r2; wanted[3] = r3;
+        set = (r0 > 0 ? 1 : 0) | (r1 > 0 ? 2 : 0) | (r2 > 0 ? 4 : 0) | (r3 > 0 ? 8 : 0);
+      } else for (let k = 0; k < count; k++) {
         let r = -closingNow[k] - target[k];
         for (let l = 0; l < count; l++) r += K[kb + P * k + l] * cNormalImpulse[m * P + l];
         wanted[k] = r;
